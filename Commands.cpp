@@ -5,6 +5,7 @@
 #include <sstream>
 #include <sys/wait.h>
 #include <iomanip>
+#include <unordered_map>
 #include "Commands.h"
 
 using namespace std;
@@ -87,9 +88,11 @@ SmallShell::~SmallShell() {
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
+unordered_map<string, Command*> cmd_map;
+// cmd_map["chprompt"] = new ChangePromptCommand("string");
+
 Command *SmallShell::CreateCommand(const char *cmd_line) {
-    // For example:
-  /*
+
   string cmd_s = _trim(string(cmd_line));
   string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
@@ -97,21 +100,50 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     return new GetCurrDirCommand(cmd_line);
   }
   else if (firstWord.compare("showpid") == 0) {
-    return new ShowPidCommand(cmd_line);
+ //   return new ShowPidCommand(cmd_line);
   }
-  else if ...
-  .....
+  else if (firstWord.compare("chprompt") == 0){
+      return new ChangePromptCommand(cmd_line);
+  }
+
   else {
-    return new ExternalCommand(cmd_line);
+  //  return new ExternalCommand(cmd_line);
   }
-  */
+
     return nullptr;
+
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
     // TODO: Add your implementation here
-    // for example:
-    // Command* cmd = CreateCommand(cmd_line);
-    // cmd->execute();
+
+     Command* cmd = CreateCommand(cmd_line);
+     if(cmd) {
+         cmd->execute();
+     }
     // Please note that you must fork smash process for some commands (e.g., external commands....)
+}
+
+void ChangePromptCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string tmp = cmd_s.substr(8,cmd_s.length());
+    cmd_s = _trim(tmp);
+    string secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+    if(secondWord == "" || secondWord == " "){
+        SmallShell::getInstance().setName("smash");
+    } else {
+    SmallShell::getInstance().setName(secondWord);
+    }
+}
+
+void GetCurrDirCommand::execute() {
+    int size = 10;
+    char *pathName = new char(size);
+    while(getcwd(pathName,size) == nullptr){
+        char* tmp = pathName;
+        size *= 2;
+        pathName = new char (size);
+        delete tmp;
+    }
+    cout << pathName << endl;
 }

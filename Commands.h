@@ -4,15 +4,20 @@
 
 #include <vector>
 
+using namespace std;
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
 class Command {
     // TODO: Add your data members
+protected:
+    const char* cmd_line;
 public:
-    Command(const char *cmd_line);
+    explicit Command(const char *cmd_line) : cmd_line(cmd_line){};
 
-    virtual ~Command();
+    virtual ~Command(){
+        delete cmd_line;
+    };
 
     virtual void execute() = 0;
 
@@ -23,7 +28,7 @@ public:
 
 class BuiltInCommand : public Command {
 public:
-    BuiltInCommand(const char *cmd_line);
+    BuiltInCommand(const char *cmd_line): Command(cmd_line){};
 
     virtual ~BuiltInCommand() {
     }
@@ -93,6 +98,16 @@ public:
     void execute() override;
 };
 
+class ChangePromptCommand : public BuiltInCommand {
+public:
+
+    explicit ChangePromptCommand(const char *cmd_line): BuiltInCommand(cmd_line){};
+
+
+    void execute() override;
+};
+
+
 class ChangeDirCommand : public BuiltInCommand {
     // TODO: Add your data members public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
@@ -105,13 +120,11 @@ class ChangeDirCommand : public BuiltInCommand {
 
 class GetCurrDirCommand : public BuiltInCommand {
 public:
-    GetCurrDirCommand(const char *cmd_line);
-
-    virtual ~GetCurrDirCommand() {
-    }
+    explicit GetCurrDirCommand(const char *cmd_line): BuiltInCommand(cmd_line){};
 
     void execute() override;
 };
+
 
 class ShowPidCommand : public BuiltInCommand {
 public:
@@ -244,6 +257,7 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
+    string name = "smash";
 
 public:
     Command *CreateCommand(const char *cmd_line);
@@ -255,6 +269,14 @@ public:
         static SmallShell instance; // Guaranteed to be destroyed.
         // Instantiated on first use.
         return instance;
+    }
+
+    const string &getName() const {
+        return name;
+    }
+
+    void setName(const string &name) {
+        SmallShell::name = name;
     }
 
     ~SmallShell();
