@@ -3,6 +3,7 @@
 #define SMASH_COMMAND_H_
 
 #include <vector>
+#include <map>
 
 using namespace std;
 #define COMMAND_MAX_LENGTH (200)
@@ -16,7 +17,7 @@ public:
     explicit Command(const char *cmd_line) : cmd_line(cmd_line){};
 
     virtual ~Command(){
-        delete cmd_line;
+  //      delete cmd_line;
     };
 
     virtual void execute() = 0;
@@ -139,8 +140,10 @@ public:
 class JobsList;
 
 class QuitCommand : public BuiltInCommand {
-    // TODO: Add your data members public:
-    QuitCommand(const char *cmd_line, JobsList *jobs);
+    // TODO: Add your data members
+    JobsList* jobs;
+    public:
+    QuitCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line), jobs(jobs){};
 
     virtual ~QuitCommand() {
     }
@@ -152,14 +155,16 @@ class QuitCommand : public BuiltInCommand {
 class JobsList {
 public:
     class JobEntry {
-        // TODO: Add your data members
+    public:
+        int id;
+        int pid;
+        string cmd_line;
     };
-
-    // TODO: Add your data members
+    map<int,JobEntry> job_map;
 public:
-    JobsList();
+    JobsList() = default;
 
-    ~JobsList();
+    ~JobsList() = default;
 
     void addJob(Command *cmd, bool isStopped = false);
 
@@ -181,9 +186,9 @@ public:
 };
 
 class JobsCommand : public BuiltInCommand {
-    // TODO: Add your data members
+    JobsList* jobs;
 public:
-    JobsCommand(const char *cmd_line, JobsList *jobs);
+    JobsCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line),jobs(jobs){}
 
     virtual ~JobsCommand() {
     }
@@ -258,6 +263,7 @@ private:
     // TODO: Add your data members
     SmallShell();
     string name = "smash";
+    JobsList* jobs = new JobsList;
 
 public:
     Command *CreateCommand(const char *cmd_line);

@@ -78,32 +78,39 @@ void _removeBackgroundSign(char *cmd_line) {
 // TODO: Add your implementation for classes in Commands.h 
 
 SmallShell::SmallShell() {
+
 // TODO: add your implementation
 }
 
 SmallShell::~SmallShell() {
+    delete jobs;
 // TODO: add your implementation
 }
 
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-unordered_map<string, Command*> cmd_map;
-// cmd_map["chprompt"] = new ChangePromptCommand("string");
+
 
 Command *SmallShell::CreateCommand(const char *cmd_line) {
 
   string cmd_s = _trim(string(cmd_line));
   string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
-  if (firstWord.compare("pwd") == 0) {
+  if (firstWord.compare("pwd") == 0 || firstWord.compare("pwd&") == 0){
     return new GetCurrDirCommand(cmd_line);
   }
-  else if (firstWord.compare("showpid") == 0) {
+  else if (firstWord.compare("showpid") == 0 || firstWord.compare("showpid&") == 0 ) {
  //   return new ShowPidCommand(cmd_line);
   }
-  else if (firstWord.compare("chprompt") == 0){
+  else if (firstWord.compare("chprompt") == 0 || firstWord.compare("chprompt&") == 0){
       return new ChangePromptCommand(cmd_line);
+  }
+  else if (firstWord.compare("jobs") == 0 || firstWord.compare("jobs&") == 0){
+      return new JobsCommand(cmd_line, this->jobs);
+  }
+  else if (firstWord.compare("quit") == 0 || firstWord.compare("quit&") == 0){
+      return new QuitCommand(cmd_line, this->jobs);
   }
 
   else {
@@ -121,15 +128,18 @@ void SmallShell::executeCommand(const char *cmd_line) {
      if(cmd) {
          cmd->execute();
      }
+     // delete cmd; // - possibly too much memory will be allocated
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
 
 void ChangePromptCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
-    string tmp = cmd_s.substr(8,cmd_s.length());
+    string tmp = cmd_s.substr(8,cmd_s.length()); //chprompt length is 8
     cmd_s = _trim(tmp);
     string secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
-    if(secondWord == "" || secondWord == " "){
+
+    //Replacing shell name to second word if it exists
+    if(secondWord == "" || secondWord == " "|| secondWord == "&"){
         SmallShell::getInstance().setName("smash");
     } else {
     SmallShell::getInstance().setName(secondWord);
@@ -137,8 +147,9 @@ void ChangePromptCommand::execute() {
 }
 
 void GetCurrDirCommand::execute() {
-    int size = 10;
+    int size = 100;
     char *pathName = new char(size);
+    ///Allocate more memory if the path is too long
     while(getcwd(pathName,size) == nullptr){
         char* tmp = pathName;
         size *= 2;
@@ -146,4 +157,43 @@ void GetCurrDirCommand::execute() {
         delete tmp;
     }
     cout << pathName << endl;
+}
+
+void JobsCommand::execute() {
+    if(jobs) {
+        this->jobs->printJobsList();
+    }
+}
+
+void JobsList::printJobsList() {
+    for(auto pair : this->job_map){
+        cout << "[" << pair.first <<"] " << pair.second.cmd_line;
+    }
+}
+
+void JobsList::killAllJobs() {
+    for (const auto& pair : job_map){
+        kill(pair.second.pid, SIGKILL);
+    }
+    job_map.clear();
+}
+
+void QuitCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string tmp = cmd_s.substr(4,cmd_s.length()); //quit length is 4
+    cmd_s = _trim(tmp);
+    string secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+
+    //displaying jobs by pid and original cmd line and then killing them
+    if(secondWord == "kill" || secondWord == "kill&"){
+        int size = this->jobs->job_map.size();
+        cout << "sending SIGKILL to " << size << " jobs" << endl;
+        for(auto pair : this->jobs->job_map){
+            cout << pair.second.pid <<": " << pair.second.cmd_line << endl;
+        }
+        this->jobs->killAllJobs();
+    }
+
+    //exiting from smash in either case
+    exit(0);
 }
