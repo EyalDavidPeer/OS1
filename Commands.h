@@ -4,6 +4,8 @@
 
 #include <vector>
 #include <map>
+#include <unordered_set>
+#include <unordered_map>
 
 using namespace std;
 #define COMMAND_MAX_LENGTH (200)
@@ -220,7 +222,7 @@ public:
 
 class AliasCommand : public BuiltInCommand {
 public:
-    AliasCommand(const char *cmd_line);
+    explicit AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
 
     virtual ~AliasCommand() {
     }
@@ -264,6 +266,10 @@ private:
     SmallShell();
     string name = "smash";
     JobsList* jobs = new JobsList;
+    unordered_map<string, string> aliases;
+    unordered_set<string> saved_words = {"chprompt","quit","alias","showpid","cd","pwd","jobs","fg","kill",
+                                         "unalias","unsetenv","watchproc","du","whoami","netinfo"};
+
 
 public:
     Command *CreateCommand(const char *cmd_line);
@@ -290,6 +296,15 @@ public:
     void executeCommand(const char *cmd_line);
 
     // TODO: add extra methods as needed
+    bool isSaved(const string &word) const;
+
+    bool isAlias(const string &alias) const;
+
+    void addAlias(string alias, string cmd_line);
+
+    void printAliases() const;
+
+    string getRealNamefromAlias(const string &alias);
 };
 
 #endif //SMASH_COMMAND_H_
