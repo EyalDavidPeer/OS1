@@ -3,16 +3,24 @@
 #define SMASH_COMMAND_H_
 
 #include <vector>
+#include <map>
+#include <unordered_set>
+#include <unordered_map>
 
+using namespace std;
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
 class Command {
     // TODO: Add your data members
+protected:
+    const char* cmd_line;
 public:
-    Command(const char *cmd_line);
+    explicit Command(const char *cmd_line) : cmd_line(cmd_line){};
 
-    virtual ~Command();
+    virtual ~Command(){
+  //      delete cmd_line;
+    };
 
     virtual void execute() = 0;
 
@@ -23,7 +31,7 @@ public:
 
 class BuiltInCommand : public Command {
 public:
-    BuiltInCommand(const char *cmd_line);
+    BuiltInCommand(const char *cmd_line): Command(cmd_line){};
 
     virtual ~BuiltInCommand() {
     }
@@ -93,6 +101,16 @@ public:
     void execute() override;
 };
 
+class ChangePromptCommand : public BuiltInCommand {
+public:
+
+    explicit ChangePromptCommand(const char *cmd_line): BuiltInCommand(cmd_line){};
+
+
+    void execute() override;
+};
+
+
 class ChangeDirCommand : public BuiltInCommand {
     // TODO: Add your data members public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
@@ -105,13 +123,11 @@ class ChangeDirCommand : public BuiltInCommand {
 
 class GetCurrDirCommand : public BuiltInCommand {
 public:
-    GetCurrDirCommand(const char *cmd_line);
-
-    virtual ~GetCurrDirCommand() {
-    }
+    explicit GetCurrDirCommand(const char *cmd_line): BuiltInCommand(cmd_line){};
 
     void execute() override;
 };
+
 
 class ShowPidCommand : public BuiltInCommand {
 public:
@@ -126,8 +142,10 @@ public:
 class JobsList;
 
 class QuitCommand : public BuiltInCommand {
-    // TODO: Add your data members public:
-    QuitCommand(const char *cmd_line, JobsList *jobs);
+    // TODO: Add your data members
+    JobsList* jobs;
+    public:
+    QuitCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line), jobs(jobs){};
 
     virtual ~QuitCommand() {
     }
@@ -139,14 +157,16 @@ class QuitCommand : public BuiltInCommand {
 class JobsList {
 public:
     class JobEntry {
-        // TODO: Add your data members
+    public:
+        int id;
+        int pid;
+        string cmd_line;
     };
-
-    // TODO: Add your data members
+    map<int,JobEntry> job_map;
 public:
-    JobsList();
+    JobsList() = default;
 
-    ~JobsList();
+    ~JobsList() = default;
 
     void addJob(Command *cmd, bool isStopped = false);
 
@@ -168,9 +188,9 @@ public:
 };
 
 class JobsCommand : public BuiltInCommand {
-    // TODO: Add your data members
+    JobsList* jobs;
 public:
-    JobsCommand(const char *cmd_line, JobsList *jobs);
+    JobsCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line),jobs(jobs){}
 
     virtual ~JobsCommand() {
     }
@@ -202,7 +222,7 @@ public:
 
 class AliasCommand : public BuiltInCommand {
 public:
-    AliasCommand(const char *cmd_line);
+    explicit AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
 
     virtual ~AliasCommand() {
     }
@@ -244,6 +264,12 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
+    string name = "smash";
+    JobsList* jobs = new JobsList;
+    unordered_map<string, string> aliases;
+    unordered_set<string> saved_words = {"chprompt","quit","alias","showpid","cd","pwd","jobs","fg","kill",
+                                         "unalias","unsetenv","watchproc","du","whoami","netinfo"};
+
 
 public:
     Command *CreateCommand(const char *cmd_line);
@@ -257,11 +283,28 @@ public:
         return instance;
     }
 
+    const string &getName() const {
+        return name;
+    }
+
+    void setName(const string &name) {
+        SmallShell::name = name;
+    }
+
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
 
     // TODO: add extra methods as needed
+    bool isSaved(const string &word) const;
+
+    bool isAlias(const string &alias) const;
+
+    void addAlias(string alias, string cmd_line);
+
+    void printAliases() const;
+
+    string getRealNamefromAlias(const string &alias);
 };
 
 #endif //SMASH_COMMAND_H_
