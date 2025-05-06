@@ -133,14 +133,14 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   }
 
 //  else if (firstWord.compare("fg") == 0 || firstWord.compare("fg&") == 0){
-//      return new ForegroundCommand(cmd_line,getInstance().jobs);
-//  }
+//     return new ForegroundCommand(cmd_line,getInstance().jobs);
+// }
 
 //TODO: check kill
 
 //  else if (firstWord.compare("kill") == 0){
-//      return new KillCommand(cmd_line,getInstance().jobs);
-//  }
+//    return new KillCommand(cmd_line,getInstance().jobs);
+// }
 
   else if (firstWord.compare("jobs") == 0 || firstWord.compare("jobs&") == 0){
       return new JobsCommand(cmd_line, this->jobs);
@@ -393,8 +393,8 @@ void ChangeDirCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
     string tmp = cmd_s.substr(2); //cd length is 2
     cmd_s = _trim(tmp);
-    char *old = getcwd(nullptr, 0);
-    if (!old) {
+    char *old = new char(1024);
+    if (getcwd(old, 1024) == NULL) {
         perror("getcwd");
         return;
     }
@@ -406,8 +406,8 @@ void ChangeDirCommand::execute() {
 }
     if(cmd_s == "-"){
         char** oldPwd = this->m_plastPwd;
-        char* currentDir = getcwd(nullptr, 0);
-        if (!currentDir) {
+        char* currentDir = new char(1024);
+        if (getcwd(currentDir, 1024) == NULL) {
             perror("getcwd");
             return;
         }
