@@ -177,7 +177,9 @@ public:
 public:
     JobsList() = default;
 
-    ~JobsList() = default;
+    ~JobsList() {
+        int x;
+    }
 
     void addJob(int pid, const string &cmd_line, bool isStopped = false);
 

@@ -258,8 +258,7 @@ void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
     job_map[id] = job;
     pid_to_id_map[pid] = id;
     max_id++;
-    cout << "added job: " << cmd_line << "pid:" << pid << endl;
-    printJobsList();
+
 
     //add job entry to job list
 
@@ -273,7 +272,6 @@ void JobsList::removeJobByPid(int jobPid) {
         int id = pid_to_id_map[jobPid];
         removeJobById(id);
     }
-    cout << "removed: " << jobPid << endl;
 }
 
 void JobsList::removeJobById(int jobId) {
@@ -298,7 +296,6 @@ void JobsList::removeJobById(int jobId) {
             max_id = 0;
         }
     }
-    cout << "removed " << endl;
 }
 
 
@@ -498,12 +495,12 @@ void ExternalCommand::execute() {
     //fork a new process, if command is in background add it to jobList
     int pid = fork();
     if(pid == 0 ){
-        if (cmd_state == BG){
-            SmallShell::getInstance().getJobs()->addJob(getpid(), original_line);
-        }
+        setpgrp();
         execvp(argv[0], argv);
     } else if (cmd_state == FG){
         wait(NULL);
+    } else if (cmd_state == BG){
+        SmallShell::getInstance().getJobs()->addJob(pid, original_line);
     }
 }
 
@@ -532,11 +529,11 @@ void ExternalCommand::executeComplex() {
     //add to job list if necessary
 
     if (pid == 0){
-        if (cmd_state == BG){
-            SmallShell::getInstance().getJobs()->addJob(getpid(), original_line);
-        }
+        setpgrp();
         execv(complex_path.c_str(), argv);
     } else if (cmd_state == FG) {
         wait(NULL);
+    } else if (cmd_state == BG){
+        SmallShell::getInstance().getJobs()->addJob(pid, original_line);
     }
 }
