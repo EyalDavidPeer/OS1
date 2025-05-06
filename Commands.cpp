@@ -156,7 +156,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
      if(cmd) {
          cmd->execute();
      }
-     // delete cmd; // - possibly too much memory will be allocated
+      delete cmd; // - possibly too much memory will be allocated
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
 
@@ -258,6 +258,8 @@ void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
     job_map[id] = job;
     pid_to_id_map[pid] = id;
     max_id++;
+    cout << "added job: " << cmd_line << "pid:" << pid << endl;
+    printJobsList();
 
     //add job entry to job list
 
@@ -271,6 +273,7 @@ void JobsList::removeJobByPid(int jobPid) {
         int id = pid_to_id_map[jobPid];
         removeJobById(id);
     }
+    cout << "removed: " << jobPid << endl;
 }
 
 void JobsList::removeJobById(int jobId) {
@@ -295,6 +298,7 @@ void JobsList::removeJobById(int jobId) {
             max_id = 0;
         }
     }
+    cout << "removed " << endl;
 }
 
 
@@ -449,10 +453,19 @@ enum CommandState {BG, FG};
 void ExternalCommand::execute() {
     CommandState cmd_state = FG;
 
-    //fish the arguments from the command line
-    char* argv[21];
+    //preparing the argument vector
+    char* argv[23];
     string cmd_s = _trim(string(this->cmd_line));
     int i = 0, arg_idx = cmd_s.find_first_of(" \n");
+
+    //handle complex external commands
+
+    if(cmd_s.find_first_of('*') != string::npos || cmd_s.find_first_of('?') != string::npos){
+        executeComplex();
+        return;
+    }
+
+    //fishing the arguments from the commmand line
     while(true){
         string arg = cmd_s.substr(0, arg_idx);
         argv[i] = new char(arg.length() + 1);
@@ -482,14 +495,48 @@ void ExternalCommand::execute() {
         }
     }
 
-
     //fork a new process, if command is in background add it to jobList
     int pid = fork();
     if(pid == 0 ){
+        if (cmd_state == BG){
+            SmallShell::getInstance().getJobs()->addJob(getpid(), original_line);
+        }
         execvp(argv[0], argv);
     } else if (cmd_state == FG){
         wait(NULL);
-    } else if (cmd_state == BG){
-        SmallShell::getInstance().getJobs()->addJob(pid, original_line);
+    }
+}
+
+void ExternalCommand::executeComplex() {
+    string complex_path = "/bin/bash";
+    string complex_flag = "-c";
+    CommandState cmd_state = FG;
+
+    //make new argv
+    char* argv[4];
+    argv[0] = new char(complex_path.length() + 1);
+    strcpy(argv[0], complex_path.c_str());
+    argv[1] = new char(complex_flag.length() + 1);
+    strcpy(argv[1], complex_flag.c_str());
+    string orig_line = _trim(this->original_line);
+    argv[2] = new char(orig_line.length() + 1);
+    strcpy(argv[2], orig_line.c_str());
+    argv[3] = nullptr;
+
+    //check if last char is ampersand
+    if(orig_line[orig_line.length() - 1] == '&'){
+        cmd_state = BG;
+    }
+    //fork the process
+    int pid = fork();
+    //add to job list if necessary
+
+    if (pid == 0){
+        if (cmd_state == BG){
+            SmallShell::getInstance().getJobs()->addJob(getpid(), original_line);
+        }
+        execv(complex_path.c_str(), argv);
+    } else if (cmd_state == FG) {
+        wait(NULL);
     }
 }

@@ -20,7 +20,7 @@ public:
     explicit Command(const char *cmd_line) : cmd_line(cmd_line){};
 
     virtual ~Command(){
-  //      delete cmd_line;
+   //    delete cmd_line;
     };
 
     virtual void execute() = 0;
@@ -49,6 +49,7 @@ public:
 
     void execute() override;
 
+    void executeComplex();
 };
 
 
