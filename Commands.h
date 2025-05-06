@@ -6,7 +6,8 @@
 #include <map>
 #include <unordered_set>
 #include <unordered_map>
-
+#include <cstdlib>
+#include <cstring>
 using namespace std;
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -113,10 +114,11 @@ public:
 
 class ChangeDirCommand : public BuiltInCommand {
     // TODO: Add your data members public:
-    ChangeDirCommand(const char *cmd_line, char **plastPwd);
+    char ** m_plastPwd;
 
-    virtual ~ChangeDirCommand() {
-    }
+public:
+    ChangeDirCommand(const char *cmd_line, char **plastPwd) : BuiltInCommand(cmd_line),m_plastPwd(plastPwd){};
+    virtual ~ChangeDirCommand() {}
 
     void execute() override;
 };
@@ -131,7 +133,7 @@ public:
 
 class ShowPidCommand : public BuiltInCommand {
 public:
-    ShowPidCommand(const char *cmd_line);
+    explicit ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line){};
 
     virtual ~ShowPidCommand() {
     }
@@ -161,6 +163,7 @@ public:
         int id;
         int pid;
         string cmd_line;
+        bool isStopped;
     };
     map<int,JobEntry> job_map;
 public:
@@ -185,6 +188,8 @@ public:
     JobEntry *getLastStoppedJob(int *jobId);
 
     // TODO: Add extra methods or modify exisitng ones as needed
+
+    JobEntry *getLastStoppedJob();
 };
 
 class JobsCommand : public BuiltInCommand {
@@ -211,8 +216,9 @@ public:
 
 class ForegroundCommand : public BuiltInCommand {
     // TODO: Add your data members
+    JobsList* m_jobs;
 public:
-    ForegroundCommand(const char *cmd_line, JobsList *jobs);
+    ForegroundCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line),m_jobs(jobs){};
 
     virtual ~ForegroundCommand() {
     }
@@ -232,7 +238,7 @@ public:
 
 class UnAliasCommand : public BuiltInCommand {
 public:
-    UnAliasCommand(const char *cmd_line);
+    UnAliasCommand(const char *cmd_line): BuiltInCommand(cmd_line){}
 
     virtual ~UnAliasCommand() {
     }
@@ -252,7 +258,7 @@ public:
 
 class WatchProcCommand : public BuiltInCommand {
 public:
-    WatchProcCommand(const char *cmd_line);
+    WatchProcCommand(const char *cmd_line): BuiltInCommand(cmd_line){}
 
     virtual ~WatchProcCommand() {
     }
@@ -269,6 +275,8 @@ private:
     unordered_map<string, string> aliases;
     unordered_set<string> saved_words = {"chprompt","quit","alias","showpid","cd","pwd","jobs","fg","kill",
                                          "unalias","unsetenv","watchproc","du","whoami","netinfo"};
+    char* lastPwd = nullptr;
+    char** plastPwd = nullptr;
 
 
 public:
@@ -291,6 +299,35 @@ public:
         SmallShell::name = name;
     }
 
+    void setLastPwd(char* path) {
+
+        if (!path) {
+            return;
+        }
+
+        if(path == lastPwd){ return;}
+
+
+        if (lastPwd) {
+            free(lastPwd);
+        }
+        lastPwd = strdup(path);
+
+        if (!plastPwd) {
+            plastPwd = &lastPwd;
+        }
+    }
+
+    char** getLastPwdPtr() {
+        return plastPwd;
+    }
+
+
+    JobsList* getJobs(){
+        return jobs;
+    }
+
+
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
@@ -301,6 +338,8 @@ public:
     bool isAlias(const string &alias) const;
 
     void addAlias(string alias, string cmd_line);
+
+    void removeAlias(string alias);
 
     void printAliases() const;
 
