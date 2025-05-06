@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <unordered_map>
 
+
 using namespace std;
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -19,7 +20,7 @@ public:
     explicit Command(const char *cmd_line) : cmd_line(cmd_line){};
 
     virtual ~Command(){
-  //      delete cmd_line;
+   //    delete cmd_line;
     };
 
     virtual void execute() = 0;
@@ -39,12 +40,16 @@ public:
 
 class ExternalCommand : public Command {
 public:
-    ExternalCommand(const char *cmd_line);
+    string original_line;
+    explicit ExternalCommand(const char *cmd_line, string original_line): Command(cmd_line),
+    original_line(move(original_line)){}
 
     virtual ~ExternalCommand() {
     }
 
     void execute() override;
+
+    void executeComplex();
 };
 
 
@@ -156,29 +161,38 @@ class QuitCommand : public BuiltInCommand {
 
 class JobsList {
 public:
+    int max_id = 0;
     class JobEntry {
     public:
         int id;
         int pid;
         string cmd_line;
+        bool isStopped;
+        JobEntry(int id, int pid, string cmd_line, bool isStopped = false): id(id), pid(pid),
+                cmd_line(cmd_line), isStopped(isStopped){};
+        ~JobEntry() = default;
     };
-    map<int,JobEntry> job_map;
+    map<int,JobEntry*> job_map;
+    map<int, int> pid_to_id_map;
 public:
     JobsList() = default;
 
     ~JobsList() = default;
 
-    void addJob(Command *cmd, bool isStopped = false);
+    void addJob(int pid, const string &cmd_line, bool isStopped = false);
 
     void printJobsList();
 
     void killAllJobs();
+
 
     void removeFinishedJobs();
 
     JobEntry *getJobById(int jobId);
 
     void removeJobById(int jobId);
+
+    void removeJobByPid(int jobPid);
 
     JobEntry *getLastJob(int *lastJobId);
 
@@ -242,7 +256,7 @@ public:
 
 class UnSetEnvCommand : public BuiltInCommand {
 public:
-    UnSetEnvCommand(const char *cmd_line);
+    explicit UnSetEnvCommand(const char *cmd_line): BuiltInCommand(cmd_line){}
 
     virtual ~UnSetEnvCommand() {
     }
@@ -289,6 +303,10 @@ public:
 
     void setName(const string &name) {
         SmallShell::name = name;
+    }
+
+    JobsList* getJobs() const {
+        return jobs;
     }
 
     ~SmallShell();

@@ -9,7 +9,7 @@ int main(int argc, char *argv[]) {
     if (signal(SIGINT, ctrlCHandler) == SIG_ERR) {
         perror("smash error: failed to set ctrl-C handler");
     }
-
+    signal(SIGCHLD, sigchildHandler);
 
     SmallShell &smash = SmallShell::getInstance();
     while (true) {

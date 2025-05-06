@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <regex>
 #include "Commands.h"
+#include <fcntl.h>
+
 
 using namespace std;
 
@@ -96,6 +98,7 @@ SmallShell::~SmallShell() {
 Command *SmallShell::CreateCommand(const char *cmd_line) {
 
   string cmd_s = _trim(string(cmd_line));
+  string original_line = cmd_s;
   string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
   //handle case where first word is alias
@@ -112,7 +115,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
       strcpy(real_line,tmp.c_str());
       cmd_line = real_line;
       firstWord = real_name.substr(0,real_name.find_first_of(" \n"));
-      int x;
   }
 
 
@@ -135,9 +137,12 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   else if (firstWord.compare("alias") == 0){
       return new AliasCommand(cmd_line);
   }
+  else if (firstWord.compare("unsetenv") == 0 || firstWord.compare("unsetenv&") == 0){
+      return new UnSetEnvCommand(cmd_line);
+  }
 
   else {
-  //  return new ExternalCommand(cmd_line);
+    return new ExternalCommand(cmd_line, original_line);
   }
 
     return nullptr;
@@ -151,7 +156,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
      if(cmd) {
          cmd->execute();
      }
-     // delete cmd; // - possibly too much memory will be allocated
+      delete cmd; // - possibly too much memory will be allocated
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
 
@@ -234,16 +239,68 @@ void JobsCommand::execute() {
 
 void JobsList::printJobsList() {
     for(auto pair : this->job_map){
-        cout << "[" << pair.first <<"] " << pair.second.cmd_line;
+        cout << "[" << pair.first <<"] " << pair.second->cmd_line << endl;
+
     }
 }
 
 void JobsList::killAllJobs() {
     for (const auto& pair : job_map){
-        kill(pair.second.pid, SIGKILL);
+        kill(pair.second->pid, SIGKILL);
+        delete pair.second;
     }
     job_map.clear();
 }
+
+void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
+    int id = max_id + 1;
+    JobEntry* job = new JobEntry(id, pid, cmd_line, isStopped);
+    job_map[id] = job;
+    pid_to_id_map[pid] = id;
+    max_id++;
+    cout << "added job: " << cmd_line << "pid:" << pid << endl;
+    printJobsList();
+
+    //add job entry to job list
+
+    //check if sigchld handler works
+
+}
+
+void JobsList::removeJobByPid(int jobPid) {
+    auto it = pid_to_id_map.find(jobPid);
+    if(it != pid_to_id_map.end()) {
+        int id = pid_to_id_map[jobPid];
+        removeJobById(id);
+    }
+    cout << "removed: " << jobPid << endl;
+}
+
+void JobsList::removeJobById(int jobId) {
+    auto it1 = this->job_map.find(jobId);
+    int pid;
+    if (it1 != job_map.end()) {
+        pid = it1->second->pid;
+        delete it1->second;
+        job_map.erase(it1);
+    } else {
+        return;
+    }
+    auto it2 = this->pid_to_id_map.find(pid);
+    if(it2 != pid_to_id_map.end()){
+        pid_to_id_map.erase(it2);
+    }
+    if(max_id == jobId){
+        auto it3 = job_map.rbegin();
+        if(it3 != job_map.rend()) {
+            max_id = it3->first;
+        } else {
+            max_id = 0;
+        }
+    }
+    cout << "removed " << endl;
+}
+
 
 void QuitCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
@@ -256,7 +313,7 @@ void QuitCommand::execute() {
         int size = this->jobs->job_map.size();
         cout << "sending SIGKILL to " << size << " jobs" << endl;
         for(auto pair : this->jobs->job_map){
-            cout << pair.second.pid <<": " << pair.second.cmd_line << endl;
+            cout << pair.second->pid <<": " << pair.second->cmd_line << endl;
         }
         this->jobs->killAllJobs();
     }
@@ -294,4 +351,192 @@ void AliasCommand::execute() {
     string real_name = cmd_s.substr(cmd_s.find_first_of('\'') + 1,cmd_s.length());
     real_name = real_name.substr(0, real_name.find_first_of('\''));
     SmallShell::getInstance().addAlias(secondWord, real_name);
+}
+
+void UnSetEnvCommand::execute() {
+
+    //working with open / read instructions
+    unordered_set<string> vars;
+    int pid = getpid();
+    string environ_path = "/proc/" + to_string(pid) + "/environ";
+    cout << environ_path << endl;
+    int fd = open(environ_path.c_str(),O_RDONLY);
+    if (fd == -1){
+        cerr << "unable to open environ file" << endl;
+        return;
+    }
+    char buffer[1001];
+    ssize_t bytes_read = read(fd,buffer,1000);
+    char* current_char;
+    bool equal_sign_detected = false;
+    string new_var;
+
+    while(bytes_read > 0){
+        buffer[bytes_read] = '/0';
+        current_char = buffer;
+
+        //keep looping as long as there are chars, if current char == '/0' then buffer is finished
+        while(*current_char != '/0') {
+
+            //insert new environment variable name to set
+            if(*current_char == '/n'){
+                //start looking for new var name
+                equal_sign_detected = false;
+            }
+            else if(*current_char == '='){
+                //stop looking for new var name until new line
+                equal_sign_detected = true;
+                vars.insert(new_var);
+                cout << new_var << endl;
+                new_var.clear();
+            } else if(!equal_sign_detected){
+                new_var += *current_char;
+            }
+            current_char++;
+        }
+        //reset the variables towards next read and read next block
+        bytes_read = read(fd, buffer, 1000);
+    }
+
+
+    /*
+    int i = 0;
+    vector<string> unwanted_vars ={"HOME"};
+    unordered_map<string,string> enviroment_vars;
+
+    //insert enviroment variables to a set
+    while(environ[i]){
+        string var_full = string(environ[i]);
+        string var_key = var_full.substr(0,var_full.find_first_of('='));
+        string var_value = var_full.substr(var_full.find_first_of('='),var_full.length());
+        enviroment_vars[var_key] = var_value;
+        i++;
+    }
+    cout << "finished with the map" << endl;
+*/
+
+
+
+
+/*
+
+    //check for each argument if it is an enviroment variable,
+    // if so - we will delete it from the set, if not - an error will be returned
+    for(const auto & var : unwanted_vars){
+        auto it = enviroment_vars.find(var);
+        if(it != enviroment_vars.end()){
+           enviroment_vars.erase(it);
+        } else {
+            cerr <<  "smash error: unsetenv: "<< var << "does not exist" << endl;
+        }
+    }
+    cout << "finished removing" << endl;
+
+    //update environ array according to remaining variables in enviroment_vars
+    i = 0;
+    for(auto& pair : enviroment_vars){
+        environ[i] = new char(pair.second.length() + pair.first.length());
+        string str = pair.first + pair.second;
+        strcpy(environ[i],str.c_str());
+        i++;
+    }
+
+
+    environ[i] = nullptr;
+
+    cout << environ[1] << endl;
+    cout << "finished updating" << endl;
+    */
+}
+
+enum CommandState {BG, FG};
+void ExternalCommand::execute() {
+    CommandState cmd_state = FG;
+
+    //preparing the argument vector
+    char* argv[23];
+    string cmd_s = _trim(string(this->cmd_line));
+    int i = 0, arg_idx = cmd_s.find_first_of(" \n");
+
+    //handle complex external commands
+
+    if(cmd_s.find_first_of('*') != string::npos || cmd_s.find_first_of('?') != string::npos){
+        executeComplex();
+        return;
+    }
+
+    //fishing the arguments from the commmand line
+    while(true){
+        string arg = cmd_s.substr(0, arg_idx);
+        argv[i] = new char(arg.length() + 1);
+        strcpy(argv[i], arg.c_str());
+        if (arg_idx == -1){
+            i++;
+            break;
+        }
+        cmd_s = cmd_s.substr(arg_idx,cmd_s.length());
+        cmd_s = _trim(cmd_s);
+        arg_idx = cmd_s.find_first_of(" \n");
+        i++;
+    }
+    argv[i] = nullptr;
+
+    //check if & is the last char in the last argument
+    int j = 0;
+    while(argv[i-1][j + 1]){
+        j++;
+    }
+    if(argv[i-1][j] == '&'){
+        cmd_state = BG; //make sure command runs in background
+        if(j == 0){
+            argv[i-1] = nullptr;
+        } else {
+            argv[i - 1][j] = '\0';
+        }
+    }
+
+    //fork a new process, if command is in background add it to jobList
+    int pid = fork();
+    if(pid == 0 ){
+        if (cmd_state == BG){
+            SmallShell::getInstance().getJobs()->addJob(getpid(), original_line);
+        }
+        execvp(argv[0], argv);
+    } else if (cmd_state == FG){
+        wait(NULL);
+    }
+}
+
+void ExternalCommand::executeComplex() {
+    string complex_path = "/bin/bash";
+    string complex_flag = "-c";
+    CommandState cmd_state = FG;
+
+    //make new argv
+    char* argv[4];
+    argv[0] = new char(complex_path.length() + 1);
+    strcpy(argv[0], complex_path.c_str());
+    argv[1] = new char(complex_flag.length() + 1);
+    strcpy(argv[1], complex_flag.c_str());
+    string orig_line = _trim(this->original_line);
+    argv[2] = new char(orig_line.length() + 1);
+    strcpy(argv[2], orig_line.c_str());
+    argv[3] = nullptr;
+
+    //check if last char is ampersand
+    if(orig_line[orig_line.length() - 1] == '&'){
+        cmd_state = BG;
+    }
+    //fork the process
+    int pid = fork();
+    //add to job list if necessary
+
+    if (pid == 0){
+        if (cmd_state == BG){
+            SmallShell::getInstance().getJobs()->addJob(getpid(), original_line);
+        }
+        execv(complex_path.c_str(), argv);
+    } else if (cmd_state == FG) {
+        wait(NULL);
+    }
 }
