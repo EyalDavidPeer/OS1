@@ -9,7 +9,9 @@
 #include <regex>
 #include "Commands.h"
 #include <fcntl.h>
+#include <fstream>
 #include <stdexcept>
+
 
 using namespace std;
 
@@ -118,16 +120,36 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   }
 
 
+  if(SmallShell::isArrows(cmd_line)){
+        return new RedirectionCommand(cmd_line);
+  }
 
+  if(SmallShell::isPipe(cmd_line)){
+        return new PipeCommand(cmd_line);
+  }
   if (firstWord.compare("pwd") == 0 || firstWord.compare("pwd&") == 0){
     return new GetCurrDirCommand(cmd_line);
   }
   else if (firstWord.compare("showpid") == 0 || firstWord.compare("showpid&") == 0 ) {
- //   return new ShowPidCommand(cmd_line);
+    return new ShowPidCommand(cmd_line);
+  }
+  else if (firstWord.compare("cd") == 0 || firstWord.compare("cd&") == 0 ) {
+      return new ChangeDirCommand(cmd_line, plastPwd);
   }
   else if (firstWord.compare("chprompt") == 0 || firstWord.compare("chprompt&") == 0){
       return new ChangePromptCommand(cmd_line);
   }
+
+//  else if (firstWord.compare("fg") == 0 || firstWord.compare("fg&") == 0){
+//     return new ForegroundCommand(cmd_line,getInstance().jobs);
+// }
+
+//TODO: check kill,watchproc
+
+//  else if (firstWord.compare("kill") == 0){
+//    return new KillCommand(cmd_line,getInstance().jobs);
+// }
+
   else if (firstWord.compare("jobs") == 0 || firstWord.compare("jobs&") == 0){
       return new JobsCommand(cmd_line, this->jobs);
   }
@@ -137,16 +159,19 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   else if (firstWord.compare("alias") == 0){
       return new AliasCommand(cmd_line);
   }
-  else if (firstWord.compare("unsetenv") == 0 || firstWord.compare("unsetenv&") == 0){
-      return new UnSetEnvCommand(cmd_line);
+//  else if (firstWord.compare("unsetenv") == 0 || firstWord.compare("unsetenv&") == 0){
+//      return new UnSetEnvCommand(cmd_line);
+//  }
+
+  else if (firstWord.compare("unalias") == 0){
+      return new UnAliasCommand(cmd_line);
   }
 
-  else {
-    return new ExternalCommand(cmd_line, original_line);
+  else if (firstWord.compare("watchproc") == 0){
+      return new WatchProcCommand(cmd_line);
   }
 
-    return nullptr;
-
+  return new ExternalCommand(cmd_line, original_line);
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
@@ -185,6 +210,10 @@ void SmallShell::addAlias(string alias, string cmd_line) {
     aliases_it_map[alias] = it;
 }
 
+void SmallShell::removeAlias(string alias){
+    this->aliases.erase(alias);
+}
+
 void SmallShell::printAliases() const {
     //print by order
     for(const string & alias : aliases_by_order){
@@ -213,6 +242,230 @@ string SmallShell::getRealNamefromAlias(const string &alias) {
      */
 }
 
+// TODO: temporary?
+std::vector<std::string> _parse(const std::string& str) {
+    std::istringstream iss(str);
+    std::vector<std::string> result;
+    std::string word;
+    while (iss >> word) {
+        result.push_back(word);
+    }
+    return result;
+}
+
+
+void UnAliasCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string tmp = cmd_s.substr(7,cmd_s.length()); //unalias length is 7
+    //TODO: replace the _parse method to _parseCommandLine method provided
+    std::vector<std::string> args = _parse(tmp);
+
+    if(args.size() == 0){
+        cerr << "smash error: unalias: not enough arguments" << endl;
+        return;
+    }
+
+    for(auto& alias : args){
+        if(SmallShell::getInstance().isAlias(alias)){
+            SmallShell::getInstance().removeAlias(alias);
+        }
+        else{
+            cerr << "smash error: unalias: " << alias << " alias does not exist"
+                    << endl;
+            return;
+        }
+    }
+}
+
+
+struct Stat {
+    pid_t               pid{};          // 1
+    std::string         comm;           // 2   (can hold spaces)
+    char                state{};        // 3
+    pid_t               ppid{};         // 4
+    pid_t               pgrp{};         // 5
+    unsigned long       utime{};        // 14  user‑mode ticks
+    unsigned long       stime{};        // 15  kernel‑mode ticks
+    long                rss{};          // 24  resident pages
+    unsigned long long  starttime{};    // 22  ticks since boot
+};
+
+
+
+bool read_stat(basic_string<char> pid, Stat& s)
+{
+    std::ifstream f("/proc/" + pid + "/stat");
+    if (!f) return false;
+
+    std::string line;
+    std::getline(f, line);
+
+    // 1. split out the "(comm)" portion first
+    std::size_t open  = line.find('(');
+    std::size_t close = line.rfind(')');
+    if (open == std::string::npos || close == std::string::npos || close < open)
+        return false;
+
+    std::string before = line.substr(0, open);                   // pid + space
+    std::string comm   = line.substr(open + 1, close - open - 1);
+    std::string after  = line.substr(close + 2);                 // skips ") "
+
+    {
+        std::istringstream iss(before);
+        iss >> s.pid;                                            // field #1
+    }
+    s.comm = comm;
+
+    // tokenise the remainder (field #3 onward)
+    std::istringstream iss(after);
+    std::vector<std::string> tok;
+    for (std::string t; iss >> t; ) tok.push_back(t);
+    if (tok.size() < 24) return false;                           // sanity
+
+    s.state      = tok[0][0];                                    // #3
+    s.ppid       = std::stoi(tok[1]);                            // #4
+    s.pgrp       = std::stoi(tok[2]);                            // #5
+    s.utime      = std::stoul(tok[11]);                          // #14
+    s.stime      = std::stoul(tok[12]);                          // #15
+    s.starttime  = std::stoull(tok[19]);                         // #22
+    s.rss        = std::stol(tok[21]);                           // #24
+
+    return true;
+}
+
+
+double get_uptime_seconds()
+{
+    std::ifstream u("/proc/uptime");
+    double up = 0.0;
+    u >> up;
+    return up;
+}
+
+
+double percent_cpu(const Stat& s, long clk_tck, long n_cpus, double sys_uptime)
+{
+    const double total_time_sec = double(s.utime + s.stime) / clk_tck;
+    const double seconds_alive  = sys_uptime - double(s.starttime) / clk_tck;
+
+    if (seconds_alive <= 0.0) return 0.0;
+    return 100.0 * total_time_sec / seconds_alive * n_cpus;
+}
+
+void WatchProcCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string tmp = cmd_s.substr(9,cmd_s.length()); //watchproc length is 9
+    //TODO: replace the _parse method to _parseCommandLine method provided
+    std::vector<std::string> args = _parse(tmp);
+    if(args.size() != 1){
+        cerr <<"smash error: watchproc: invalid arguments" <<endl;
+        return;
+    }
+
+    try{
+        stoi(args[0]);
+    }
+    catch(...){
+        cerr <<"smash error: watchproc: invalid arguments" <<endl;
+        return;
+    }
+
+    const long CLK   = sysconf(_SC_CLK_TCK);
+    const long CPUS  = sysconf(_SC_NPROCESSORS_ONLN);
+    const long PAGE  = sysconf(_SC_PAGESIZE);
+
+    Stat st;
+    if (!read_stat(args[0], st)) {
+        std::cerr << "smash error: watchproc: pid " << args[0] << " does not exist\n" << endl;
+        return;
+    }
+
+    const double up      = get_uptime_seconds();
+    const double pcpu    = percent_cpu(st, CLK, CPUS, up);
+    const double mem_mb  = double(st.rss) * PAGE / (1024.0 * 1024.0);
+
+    std::cout << "PID: " << args[0]
+              << " | CPU Usage: "    << std::fixed << std::setprecision(1) << pcpu << '%'
+              << " | Memory Usage: " << std::setprecision(1) << mem_mb << " MB\n";
+}
+
+
+//void KillCommand::execute() {
+//    std::string cmd_line_str = _trim(cmd_line);
+//
+//    //TODO: replace the _parse method to _parseCommandLine method provided
+//    std::vector<std::string> args = _parse(cmd_line_str);
+//
+//    if (args.size() != 3 || args[1][0] != '-') {
+//        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+//        return;
+//    }
+//
+//    int sig;
+//    int job_id;
+//    try {
+//        sig = std::stoi(args[1].substr(1));
+//        job_id = std::stoi(args[2].substr(1));
+//    } catch (...) {
+//        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+//        return;
+//    }
+//
+//    JobsList::JobEntry* job = SmallShell::getInstance().getJobs()->getJobById(job_id);
+//    if (!job) {
+//        std::cerr << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
+//        return;
+//    }
+//    if (kill(job->pid, sig) == -1) {
+//        perror("smash error: kill failed");
+//        return;
+//    }
+//    std::cout << "signal number " << sig << " was sent to pid " << job->pid << std::endl;
+//}
+
+//void ForegroundCommand::execute() {
+//    int job_id = -1;
+//    std::string cmd_line_str = _trim(cmd_line);
+//
+//    //TODO: replace the _parse method to _parseCommandLine method provided
+//    std::vector<std::string> args = _parse(cmd_line_str);
+//
+//    if (args.size() > 2) {
+//        std::cerr << "smash error: fg: invalid arguments" << std::endl;
+//        return;
+//    }
+//
+//    JobsList::JobEntry* job = nullptr;
+//    if (args.size() == 1) {
+//        job = m_jobs->getLastStoppedJob();
+//        if (!job) {
+//            std::cerr << "smash error: fg: jobs list is empty" << std::endl;
+//            return;
+//        }
+//    } else {
+//
+//        job = m_jobs->getJobById(job_id);
+//        if (!job) {
+//            std::cerr << "smash error: fg: job-id " << job_id << " does not exist" << std::endl;
+//            return;
+//        }
+//    }
+//    std::cout << job->cmd_line << " : " << job->pid << std::endl;
+//
+//    int status;
+//    if (waitpid(job->pid, &status, WUNTRACED) == -1) {
+//        //case failed
+//        return;
+//    }
+//    //removes from joblist
+//    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+//        m_jobs->removeJobById(job_id);
+//        //for cases user stopped it
+//    } else if (WIFSTOPPED(status)) {
+//        job->isStopped = true;
+//    }
+//}
+
 void ChangePromptCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
     string tmp = cmd_s.substr(8,cmd_s.length()); //chprompt length is 8
@@ -227,6 +480,58 @@ void ChangePromptCommand::execute() {
     } else {
     SmallShell::getInstance().setName(secondWord);
     }
+}
+
+void ShowPidCommand::execute() {
+    cout << "smash pid is " << getpid() << endl;
+}
+
+void ChangeDirCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string tmp = cmd_s.substr(2); //cd length is 2
+    cmd_s = _trim(tmp);
+    char *old = new char(1024);
+    if (getcwd(old, 1024) == NULL) {
+        perror("getcwd");
+        return;
+    }
+    string secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+
+    if(cmd_s.find(' ') != std::string::npos){
+    cout << "smash error: cd: too many arguments" << endl;
+    return;
+}
+    if(cmd_s == "-"){
+        char** oldPwd = this->m_plastPwd;
+        char* currentDir = new char(1024);
+        if (getcwd(currentDir, 1024) == NULL) {
+            perror("getcwd");
+            return;
+        }
+        if (!oldPwd || !*oldPwd){
+            cout << "smash error: cd: OLDPWD not set" << endl;
+            return;
+        }
+        chdir(*oldPwd);
+        SmallShell::getInstance().setLastPwd(currentDir);
+        free(currentDir);
+        return;
+    }
+
+    else{
+        const char* dest = secondWord.c_str();
+
+
+        if (chdir(dest) == -1) {
+            std::string altPath = std::string(dest) + "/";
+            if (chdir(altPath.c_str()) == -1) {
+                return;
+            }
+        }
+    }
+    SmallShell::getInstance().setLastPwd(old);
+    free(old);
+
 }
 
 void GetCurrDirCommand::execute() {
@@ -347,7 +652,6 @@ void AliasCommand::execute() {
        return;
     }
 
-
     //take second word, check if saved or already an alias - if so, return appropriate error
     cmd_s = _trim(tmp);
     string secondWord = cmd_s.substr(0, cmd_s.find_first_of("='"));
@@ -362,6 +666,9 @@ void AliasCommand::execute() {
     SmallShell::getInstance().addAlias(secondWord, real_name);
 
 }
+
+
+
 UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
     int pid = getpid();
     string environ_path = "/proc/" + to_string(pid) + "/environ";
@@ -411,6 +718,7 @@ UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line
 }
 
 
+
 void UnSetEnvCommand::execute() {
 
     //for every argument validate that it is an environment variable and delete it , stop at error
@@ -456,8 +764,8 @@ void UnSetEnvCommand::deleteEnviromentVars(unordered_set<string> &unwanted_vars)
         environ[end] = nullptr;
         end--;
     }
-
 }
+
 
 
 enum CommandState {BG, FG};
@@ -556,3 +864,186 @@ void ExternalCommand::executeComplex() {
         SmallShell::getInstance().getJobs()->addJob(pid, original_line);
     }
 }
+
+
+bool SmallShell::isArrows(const char* cmdLine){
+    int i = 0;
+    while (cmdLine[i] != '\0'){
+        if(cmdLine[i] == '>'){
+            int j = i;
+            while (cmdLine[j] == '>') {
+                j++;
+            }
+            return j - i;
+        }
+        i++;
+    }
+    return (i==1 || i ==2);
+}
+
+bool SmallShell::isPipe(const char* cmdLine){
+    string cmd = cmdLine;
+    for(auto c : cmd){
+        if(c == '|'){
+            return true;
+        }
+    }
+    return false;
+}
+
+
+
+void RedirectionCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string op;
+    size_t pos = cmd_s.find(">>");
+    if(pos != string::npos){
+        op = ">>";
+    } else{
+        pos = cmd_s.find(">");
+        if(pos != string::npos){
+            op = ">";
+        } else{
+            return;
+        }
+    }
+
+    string lhs = _trim(cmd_s.substr(0, pos));
+    string rhs = _trim(cmd_s.substr(pos + op.length()));
+
+    int fd;
+
+    if(op == ">>"){
+        fd = open(rhs.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    }
+    else{
+        fd = open(rhs.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    }
+
+    if(fd == -1){
+        perror("smash error: open failed");
+        return;
+    }
+
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("smash error: fork");
+        close(fd);
+        return;
+    }
+
+    if (pid == 0) {
+        if (dup2(fd, STDOUT_FILENO) == -1) {
+            perror("smash error: dup2");
+            _exit(1);
+        }
+        close(fd);
+
+        SmallShell::getInstance().executeCommand(lhs.c_str());
+        exit(errno);
+    }
+    close(fd);
+    waitpid(pid, nullptr, 0);
+
+
+
+
+//    int shellFd = dup(STDOUT_FILENO);
+//    if (shellFd == -1) {
+//        perror("smash error: dup failed");
+//        return;
+//    }
+//    if (dup2(fd, STDOUT_FILENO) == -1) {
+//        perror("smash error: dup2 failed");
+//        close(shellFd);
+//        return;
+//    }
+//    close(fd);
+//    const char* cmd_line = lhs.c_str();
+//    SmallShell::getInstance().executeCommand(cmd_line);
+//
+//    if (dup2(shellFd, STDOUT_FILENO) == -1) {
+//        perror("smash error: dup2 failed");
+//    }
+//    close(shellFd);
+
+}
+
+void PipeCommand::execute() {
+    string cmd_s = _trim(string(this->cmd_line));
+    string op;
+    size_t pos = cmd_s.find(">>");
+    if (pos != string::npos) {
+        op = "|&";
+    } else {
+        pos = cmd_s.find("|");
+        if (pos != string::npos){
+            op = "|";
+        }
+    }
+
+    string lhs = _trim(cmd_s.substr(0, pos));
+    string rhs = _trim(cmd_s.substr(pos + op.length()));
+
+    if (lhs.empty() || rhs.empty()) {
+        std::cerr << "smash error: pipe: invalid arguments\n";
+        return;
+    }
+
+    int fd[2];
+    if (pipe(fd) == -1) {
+        perror("smash error: pipe");
+        return;
+    }
+
+    pid_t pid1 = fork();
+    if (pid1 == -1) {
+        perror("smash error: fork");
+        close(fd[0]);
+        close(fd[1]);
+        return;
+    }
+
+    if (pid1 == 0) {
+        if (dup2(fd[1], STDOUT_FILENO) == -1) { perror("dup2");
+            exit(errno);
+        }
+        if (op == "|&" && dup2(fd[1], STDERR_FILENO) == -1) {
+            perror("dup2");
+            exit(errno);
+        }
+        close(fd[0]); close(fd[1]);
+
+        Command * cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
+        cmd->execute();
+        exit(errno);
+    }
+
+    pid_t pid2 = fork();
+
+    if (pid2 == -1) {
+        perror("smash error: fork");
+        close(fd[0]);
+        close(fd[1]);
+        return;
+    }
+    if (pid2 == 0) {
+        if (dup2(fd[0], STDIN_FILENO) == -1) { perror("dup2"); _exit(1); }
+        close(fd[0]); close(fd[1]);
+
+        Command * cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
+        cmd->execute();
+        exit(errno);
+    }
+    close(fd[0]);
+    close(fd[1]);
+
+    waitpid(pid1, nullptr, 0);
+    waitpid(pid2, nullptr, 0);
+
+
+}
+
+
+

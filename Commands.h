@@ -7,6 +7,10 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <list>
+#include <cstdlib>
+#include <cstring>
+
+
 
 
 using namespace std;
@@ -57,7 +61,7 @@ public:
 class RedirectionCommand : public Command {
     // TODO: Add your data members
 public:
-    explicit RedirectionCommand(const char *cmd_line);
+    explicit RedirectionCommand(const char *cmd_line) : Command(cmd_line){}
 
     virtual ~RedirectionCommand() {
     }
@@ -68,7 +72,7 @@ public:
 class PipeCommand : public Command {
     // TODO: Add your data members
 public:
-    PipeCommand(const char *cmd_line);
+    PipeCommand(const char *cmd_line): Command(cmd_line){}
 
     virtual ~PipeCommand() {
     }
@@ -119,10 +123,11 @@ public:
 
 class ChangeDirCommand : public BuiltInCommand {
     // TODO: Add your data members public:
-    ChangeDirCommand(const char *cmd_line, char **plastPwd);
+    char ** m_plastPwd;
 
-    virtual ~ChangeDirCommand() {
-    }
+public:
+    ChangeDirCommand(const char *cmd_line, char **plastPwd) : BuiltInCommand(cmd_line),m_plastPwd(plastPwd){};
+    virtual ~ChangeDirCommand() {}
 
     void execute() override;
 };
@@ -137,7 +142,7 @@ public:
 
 class ShowPidCommand : public BuiltInCommand {
 public:
-    ShowPidCommand(const char *cmd_line);
+    explicit ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line){};
 
     virtual ~ShowPidCommand() {
     }
@@ -169,6 +174,7 @@ public:
         int pid;
         string cmd_line;
         bool isStopped;
+
         JobEntry(int id, int pid, string cmd_line, bool isStopped = false): id(id), pid(pid),
                 cmd_line(cmd_line), isStopped(isStopped){};
         ~JobEntry() = default;
@@ -202,6 +208,8 @@ public:
     JobEntry *getLastStoppedJob(int *jobId);
 
     // TODO: Add extra methods or modify exisitng ones as needed
+
+    JobEntry *getLastStoppedJob();
 };
 
 class JobsCommand : public BuiltInCommand {
@@ -217,8 +225,9 @@ public:
 
 class KillCommand : public BuiltInCommand {
     // TODO: Add your data members
+    JobsList* m_jobs;
 public:
-    KillCommand(const char *cmd_line, JobsList *jobs);
+    KillCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line),m_jobs(jobs){}
 
     virtual ~KillCommand() {
     }
@@ -228,8 +237,9 @@ public:
 
 class ForegroundCommand : public BuiltInCommand {
     // TODO: Add your data members
+    JobsList* m_jobs;
 public:
-    ForegroundCommand(const char *cmd_line, JobsList *jobs);
+    ForegroundCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line),m_jobs(jobs){};
 
     virtual ~ForegroundCommand() {
     }
@@ -249,7 +259,7 @@ public:
 
 class UnAliasCommand : public BuiltInCommand {
 public:
-    UnAliasCommand(const char *cmd_line);
+    UnAliasCommand(const char *cmd_line): BuiltInCommand(cmd_line){}
 
     virtual ~UnAliasCommand() {
     }
@@ -272,7 +282,7 @@ public:
 
 class WatchProcCommand : public BuiltInCommand {
 public:
-    WatchProcCommand(const char *cmd_line);
+    WatchProcCommand(const char *cmd_line): BuiltInCommand(cmd_line){}
 
     virtual ~WatchProcCommand() {
     }
@@ -290,6 +300,8 @@ private:
     unordered_map<string, string> aliases;
     unordered_set<string> saved_words = {"chprompt","quit","alias","showpid","cd","pwd","jobs","fg","kill",
                                          "unalias","unsetenv","watchproc","du","whoami","netinfo"};
+    char* lastPwd = nullptr;
+    char** plastPwd = nullptr;
 
     list<string> aliases_by_order;
     unordered_map<string,_List_iterator<string>> aliases_it_map;
@@ -313,7 +325,32 @@ public:
         SmallShell::name = name;
     }
 
-    JobsList* getJobs() const {
+
+    void setLastPwd(char* path) {
+
+        if (!path) {
+            return;
+        }
+
+        if(path == lastPwd){ return;}
+
+
+        if (lastPwd) {
+            free(lastPwd);
+        }
+        lastPwd = strdup(path);
+
+        if (!plastPwd) {
+            plastPwd = &lastPwd;
+        }
+    }
+
+    char** getLastPwdPtr() {
+        return plastPwd;
+    }
+
+
+    JobsList* getJobs(){
         return jobs;
     }
 
@@ -324,6 +361,7 @@ public:
     int getForegroundPid() const {
         return fg_pid;
     }
+
 
     ~SmallShell();
 
@@ -336,7 +374,13 @@ public:
 
     void addAlias(string alias, string cmd_line);
 
+    void removeAlias(string alias);
+
     void printAliases() const;
+
+    bool isArrows(const char* cmdLine);
+
+    bool isPipe(const char* cmdLine);
 
     string getRealNamefromAlias(const string &alias);
 };
