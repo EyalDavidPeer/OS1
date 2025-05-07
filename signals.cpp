@@ -19,7 +19,7 @@ void sigchildHandler(int sig_num) {
 
     }
     //handle terminated process
-    else {
+    else { // add if is direct son of shell pid
         SmallShell::getInstance().getJobs()->removeJobByPid(pid);
     }
 }

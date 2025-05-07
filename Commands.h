@@ -183,7 +183,9 @@ public:
 public:
     JobsList() = default;
 
-    ~JobsList() = default;
+    ~JobsList() {
+        int x;
+    }
 
     void addJob(int pid, const string &cmd_line, bool isStopped = false);
 
@@ -264,13 +266,16 @@ public:
 };
 
 class UnSetEnvCommand : public BuiltInCommand {
+    unordered_map<string, string> vars;
 public:
-    explicit UnSetEnvCommand(const char *cmd_line): BuiltInCommand(cmd_line){}
+    explicit UnSetEnvCommand(const char *cmd_line);
 
     virtual ~UnSetEnvCommand() {
     }
 
     void execute() override;
+
+    void deleteEnviromentVars(vector<string> &unwanted_vars);
 };
 
 class WatchProcCommand : public BuiltInCommand {
