@@ -6,6 +6,7 @@
 #include <map>
 #include <unordered_set>
 #include <unordered_map>
+#include <list>
 
 
 using namespace std;
@@ -290,7 +291,8 @@ private:
     unordered_set<string> saved_words = {"chprompt","quit","alias","showpid","cd","pwd","jobs","fg","kill",
                                          "unalias","unsetenv","watchproc","du","whoami","netinfo"};
 
-
+    list<string> aliases_by_order;
+    unordered_map<string,_List_iterator<string>> aliases_it_map;
 public:
     Command *CreateCommand(const char *cmd_line);
 

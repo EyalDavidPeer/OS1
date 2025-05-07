@@ -11,7 +11,6 @@
 #include <fcntl.h>
 #include <stdexcept>
 
-
 using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
@@ -177,12 +176,23 @@ bool SmallShell::isAlias(const string &alias) const {
 
 void SmallShell::addAlias(string alias, string cmd_line) {
     this->aliases[alias] = cmd_line;
+
+    //prepare to print by order
+    auto it = aliases_by_order.end();
+    aliases_by_order.insert(it, alias);
+
+    //prepare for fast deletion
+    aliases_it_map[alias] = it;
 }
 
 void SmallShell::printAliases() const {
-    for(const auto &pair: this->aliases){
-        cout << pair.first <<"='" <<pair.second <<"'" << endl;
+    //print by order
+    for(const string & alias : aliases_by_order){
+        auto it = aliases.find(alias);
+        cout << alias << "='" << it->second <<"'" << endl;
     }
+
+    aliases_by_order.begin();
 }
 
 //size is the size of the new desired char* to hold the real name
@@ -350,6 +360,7 @@ void AliasCommand::execute() {
     string real_name = cmd_s.substr(cmd_s.find_first_of('\'') + 1,cmd_s.length());
     real_name = real_name.substr(0, real_name.find_first_of('\''));
     SmallShell::getInstance().addAlias(secondWord, real_name);
+
 }
 UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
     int pid = getpid();
