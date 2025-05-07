@@ -203,15 +203,17 @@ void SmallShell::addAlias(string alias, string cmd_line) {
     this->aliases[alias] = cmd_line;
 
     //prepare to print by order
-    auto it = aliases_by_order.end();
-    aliases_by_order.insert(it, alias);
-
+    auto it = aliases_by_order.insert(aliases_by_order.end(), alias);
+    
     //prepare for fast deletion
     aliases_it_map[alias] = it;
 }
 
-void SmallShell::removeAlias(string alias){
+void SmallShell::removeAlias(string alias) {
     this->aliases.erase(alias);
+    auto it = aliases_it_map[alias];
+    aliases_by_order.erase(it);
+    aliases_it_map.erase(alias);
 }
 
 void SmallShell::printAliases() const {
