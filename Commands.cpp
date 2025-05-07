@@ -405,10 +405,10 @@ UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line
 
 void UnSetEnvCommand::execute() {
 
-    //for every argument validate that it is an enviroment var and delete, stop at error
+    //for every argument validate that it is an environment variable and delete it , stop at error
     string cmd_s = _trim((string)cmd_line);
     cmd_s = cmd_s.substr(8, cmd_s.length());
-    vector<string> unwanted_vars;
+    unordered_set<string> unwanted_vars;
     while (true){
         cmd_s = _trim(cmd_s);
         int arg_idx = cmd_s.find_first_of(" \n");
@@ -418,7 +418,7 @@ void UnSetEnvCommand::execute() {
             cerr <<  "smash error: unsetenv: "<< unwanted_var << " does not exist" << endl;
             return;
         }
-        unwanted_vars.push_back(unwanted_var);
+        unwanted_vars.insert(unwanted_var);
         if (arg_idx == string :: npos){
             break;
         }
@@ -427,29 +427,28 @@ void UnSetEnvCommand::execute() {
     deleteEnviromentVars(unwanted_vars);
 }
 
-void UnSetEnvCommand::deleteEnviromentVars(vector<string> &unwanted_vars) {
-  
+void UnSetEnvCommand::deleteEnviromentVars(unordered_set<string> &unwanted_vars) {
+
+    // mark the index of variables in environ that are to be deleted
     int environ_length = 0;
     vector<int> del_indices;
     for (int i = 0; environ[i] != nullptr; i++){
         string enviro_var = environ[i];
         enviro_var = enviro_var.substr(0, enviro_var.find_first_of('='));
-        if (std::find(unwanted_vars.begin(), unwanted_vars.end(), enviro_var) != unwanted_vars.end()){
+        if (unwanted_vars.find(enviro_var) != unwanted_vars.end()){
             del_indices.push_back(i);
         }
         environ_length++;
     }
+
+    //delete the unwanted variables from environ
     int end = environ_length - 1;
     for (int idx : del_indices){
         swap(environ[idx], environ[end]);
         environ[end] = nullptr;
         end--;
     }
-
-    for (int i = 0; environ[i] != nullptr; i++){
-        cout << environ[i] << endl;
-    }
-
+    
 }
 
 

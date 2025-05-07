@@ -266,7 +266,7 @@ public:
 
     void execute() override;
 
-    void deleteEnviromentVars(vector<string> &unwanted_vars);
+    void deleteEnviromentVars(unordered_set<string> &unwanted_vars);
 };
 
 class WatchProcCommand : public BuiltInCommand {
