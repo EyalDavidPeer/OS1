@@ -60,7 +60,7 @@ public:
 class RedirectionCommand : public Command {
     // TODO: Add your data members
 public:
-    explicit RedirectionCommand(const char *cmd_line);
+    explicit RedirectionCommand(const char *cmd_line) : Command(cmd_line){}
 
     virtual ~RedirectionCommand() {
     }
@@ -71,7 +71,7 @@ public:
 class PipeCommand : public Command {
     // TODO: Add your data members
 public:
-    PipeCommand(const char *cmd_line);
+    PipeCommand(const char *cmd_line): Command(cmd_line){}
 
     virtual ~PipeCommand() {
     }
@@ -224,8 +224,9 @@ public:
 
 class KillCommand : public BuiltInCommand {
     // TODO: Add your data members
+    JobsList* m_jobs;
 public:
-    KillCommand(const char *cmd_line, JobsList *jobs);
+    KillCommand(const char *cmd_line, JobsList *jobs): BuiltInCommand(cmd_line),m_jobs(jobs){}
 
     virtual ~KillCommand() {
     }
@@ -365,6 +366,10 @@ public:
     void removeAlias(string alias);
 
     void printAliases() const;
+
+    bool isArrows(const char* cmdLine);
+
+    bool isPipe(const char* cmdLine);
 
     string getRealNamefromAlias(const string &alias);
 };
