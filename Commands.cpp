@@ -428,31 +428,28 @@ void UnSetEnvCommand::execute() {
 }
 
 void UnSetEnvCommand::deleteEnviromentVars(vector<string> &unwanted_vars) {
-    //check for each argument if it is an enviroment variable,
-    // if so - we will delete it from the set, if not - an error will be returned
-    unwanted_vars.emplace_back("");
-    for(const auto & var : unwanted_vars){
-        auto it = vars.find(var);
-        if(it != vars.end()){
-            vars.erase(it);
-        } else {
-            cerr <<  "smash error: unsetenv: "<< var << "does not exist" << endl;
+  
+    int environ_length = 0;
+    vector<int> del_indices;
+    for (int i = 0; environ[i] != nullptr; i++){
+        string enviro_var = environ[i];
+        enviro_var = enviro_var.substr(0, enviro_var.find_first_of('='));
+        if (std::find(unwanted_vars.begin(), unwanted_vars.end(), enviro_var) != unwanted_vars.end()){
+            del_indices.push_back(i);
         }
+        environ_length++;
+    }
+    int end = environ_length - 1;
+    for (int idx : del_indices){
+        swap(environ[idx], environ[end]);
+        environ[end] = nullptr;
+        end--;
     }
 
-
-    //update environ array according to remaining variables in enviroment_vars
-    int i = 0;
-    for(auto& pair : vars){
-        string str = pair.first + pair.second;
-        int length = str.length();
-        environ[i] = new char(length + 1);
-        strcpy(environ[i],str.c_str());
+    for (int i = 0; environ[i] != nullptr; i++){
         cout << environ[i] << endl;
-        i++;
     }
 
-    environ[i] = nullptr;
 }
 
 
