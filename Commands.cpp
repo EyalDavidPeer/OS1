@@ -259,8 +259,6 @@ void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
     job_map[id] = job;
     pid_to_id_map[pid] = id;
     max_id++;
-    cout << "added" << endl;
-    printJobsList();
     cout << endl;
 
 
@@ -275,7 +273,6 @@ void JobsList::removeJobByPid(int jobPid) {
     if(it != pid_to_id_map.end()) {
         int id = pid_to_id_map[jobPid];
         removeJobById(id);
-        cout << "removed" << endl;
     }
 }
 
@@ -448,7 +445,7 @@ void UnSetEnvCommand::deleteEnviromentVars(unordered_set<string> &unwanted_vars)
         environ[end] = nullptr;
         end--;
     }
-    
+
 }
 
 
@@ -528,16 +525,17 @@ void ExternalCommand::executeComplex() {
     strcpy(argv[2], orig_line.c_str());
     argv[3] = nullptr;
 
-    //check if last char is ampersand
+    //check if last char is ampersand, if so prepare to run in background
     if(orig_line[orig_line.length() - 1] == '&'){
         cmd_state = BG;
-        orig_line[orig_line.length() - 1] = '\0';
+        argv[2][orig_line.length() - 1] = '\0';
     }
+
     //fork the process
     int pid = fork();
     if (pid == 0){
         setpgrp();
-        execv(complex_path.c_str(), argv);
+        execv(complex_path.c_str(), argv); // complex_path = "/bin/bash
     } else if (cmd_state == FG) {
         SmallShell::getInstance().setForegroundPid(pid);
         wait(NULL);
