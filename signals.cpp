@@ -7,7 +7,14 @@
 using namespace std;
 
 void ctrlCHandler(int sig_num) {
-    // TODO: Add your implementation
+    cout << "smash: got ctrl-C" << endl;
+    int fg_pid = SmallShell::getInstance().getForegroundPid();
+
+    //if fg process other than shell exists, the fg_pid it will not be -1
+    if ( fg_pid != -1){
+        kill(fg_pid, SIGKILL);
+      cout <<  "smash: process " << fg_pid << " was killed" << endl;
+    }
 }
 
 void sigchildHandler(int sig_num) {

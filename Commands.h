@@ -6,6 +6,7 @@
 #include <map>
 #include <unordered_set>
 #include <unordered_map>
+#include <list>
 #include <cstdlib>
 #include <cstring>
 
@@ -276,7 +277,7 @@ public:
 
     void execute() override;
 
-    void deleteEnviromentVars(vector<string> &unwanted_vars);
+    void deleteEnviromentVars(unordered_set<string> &unwanted_vars);
 };
 
 class WatchProcCommand : public BuiltInCommand {
@@ -293,6 +294,7 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
+    int fg_pid = -1;
     string name = "smash";
     JobsList* jobs = new JobsList;
     unordered_map<string, string> aliases;
@@ -301,7 +303,8 @@ private:
     char* lastPwd = nullptr;
     char** plastPwd = nullptr;
 
-
+    list<string> aliases_by_order;
+    unordered_map<string,_List_iterator<string>> aliases_it_map;
 public:
     Command *CreateCommand(const char *cmd_line);
 
@@ -349,6 +352,14 @@ public:
 
     JobsList* getJobs(){
         return jobs;
+    }
+
+    void setForegroundPid(int pid){
+        fg_pid = pid;
+    }
+
+    int getForegroundPid() const {
+        return fg_pid;
     }
 
 
