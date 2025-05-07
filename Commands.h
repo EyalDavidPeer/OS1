@@ -283,6 +283,7 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
+    int fg_pid = -1;
     string name = "smash";
     JobsList* jobs = new JobsList;
     unordered_map<string, string> aliases;
@@ -312,6 +313,14 @@ public:
 
     JobsList* getJobs() const {
         return jobs;
+    }
+
+    void setForegroundPid(int pid){
+        fg_pid = pid;
+    }
+
+    int getForegroundPid() const {
+        return fg_pid;
     }
 
     ~SmallShell();

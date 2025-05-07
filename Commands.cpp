@@ -508,7 +508,9 @@ void ExternalCommand::execute() {
         setpgrp();
         execvp(argv[0], argv);
     } else if (cmd_state == FG){
+        SmallShell::getInstance().setForegroundPid(pid);
         wait(NULL);
+        SmallShell::getInstance().setForegroundPid(-1);
     } else if (cmd_state == BG){
         SmallShell::getInstance().getJobs()->addJob(pid, original_line);
     }
@@ -541,7 +543,9 @@ void ExternalCommand::executeComplex() {
         setpgrp();
         execv(complex_path.c_str(), argv);
     } else if (cmd_state == FG) {
+        SmallShell::getInstance().setForegroundPid(pid);
         wait(NULL);
+        SmallShell::getInstance().setForegroundPid(-1);
     } //add to job list if necessary
     else if (cmd_state == BG){
         SmallShell::getInstance().getJobs()->addJob(pid, original_line);

@@ -10,6 +10,7 @@ int main(int argc, char *argv[]) {
         perror("smash error: failed to set ctrl-C handler");
     }
     signal(SIGCHLD, sigchildHandler);
+    signal(SIGINT, ctrlCHandler);
 
     SmallShell &smash = SmallShell::getInstance();
     while (true) {
