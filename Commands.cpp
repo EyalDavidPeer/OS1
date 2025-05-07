@@ -9,6 +9,7 @@
 #include <regex>
 #include "Commands.h"
 #include <fcntl.h>
+#include <stdexcept>
 
 
 using namespace std;
@@ -156,7 +157,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
      if(cmd) {
          cmd->execute();
      }
-      delete cmd; // - possibly too much memory will be allocated
+     // delete cmd; // - possibly too much memory will be allocated
     // Please note that you must fork smash process for some commands (e.g., external commands....)
 }
 
@@ -258,6 +259,9 @@ void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
     job_map[id] = job;
     pid_to_id_map[pid] = id;
     max_id++;
+    cout << "added" << endl;
+    printJobsList();
+    cout << endl;
 
 
     //add job entry to job list
@@ -271,6 +275,7 @@ void JobsList::removeJobByPid(int jobPid) {
     if(it != pid_to_id_map.end()) {
         int id = pid_to_id_map[jobPid];
         removeJobById(id);
+        cout << "removed" << endl;
     }
 }
 
@@ -349,102 +354,107 @@ void AliasCommand::execute() {
     real_name = real_name.substr(0, real_name.find_first_of('\''));
     SmallShell::getInstance().addAlias(secondWord, real_name);
 }
-
-void UnSetEnvCommand::execute() {
-
-    //working with open / read instructions
-    unordered_set<string> vars;
+UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {
     int pid = getpid();
     string environ_path = "/proc/" + to_string(pid) + "/environ";
-    cout << environ_path << endl;
     int fd = open(environ_path.c_str(),O_RDONLY);
     if (fd == -1){
         cerr << "unable to open environ file" << endl;
-        return;
     }
     char buffer[1001];
     ssize_t bytes_read = read(fd,buffer,1000);
     char* current_char;
     bool equal_sign_detected = false;
-    string new_var;
+    string new_variable, new_value;
 
     while(bytes_read > 0){
-        buffer[bytes_read] = '/0';
+        buffer[bytes_read] = '\0';
         current_char = buffer;
 
-        //keep looping as long as there are chars, if current char == '/0' then buffer is finished
-        while(*current_char != '/0') {
+        //keep looping as long as there are chars, if current char == EOF then buffer is finished
+        while(*current_char != EOF) {
 
-            //insert new environment variable name to set
-            if(*current_char == '/n'){
-                //start looking for new var name
+            //if line has ended start looking for a new variable name
+            if(*current_char == '\0'){
                 equal_sign_detected = false;
+                vars[new_variable] = new_value;
+                new_variable.clear();
+                new_value.clear();
             }
+                // if encountered equal sign '=', insert new variable name to set
+                // start looking for new name after line is finished
             else if(*current_char == '='){
-                //stop looking for new var name until new line
                 equal_sign_detected = true;
-                vars.insert(new_var);
-                cout << new_var << endl;
-                new_var.clear();
-            } else if(!equal_sign_detected){
-                new_var += *current_char;
+                new_value += '=';
+            }
+                //if equal sign has yet been detected add chars to var name
+            else if(!equal_sign_detected){
+                new_variable += *current_char;
+            }
+                //if equal sign has been detected add chars to value
+            else {
+                new_value += *current_char;
             }
             current_char++;
         }
-        //reset the variables towards next read and read next block
+        //read next block if necessary
         bytes_read = read(fd, buffer, 1000);
     }
+}
 
 
-    /*
-    int i = 0;
-    vector<string> unwanted_vars ={"HOME"};
-    unordered_map<string,string> enviroment_vars;
+void UnSetEnvCommand::execute() {
 
-    //insert enviroment variables to a set
-    while(environ[i]){
-        string var_full = string(environ[i]);
-        string var_key = var_full.substr(0,var_full.find_first_of('='));
-        string var_value = var_full.substr(var_full.find_first_of('='),var_full.length());
-        enviroment_vars[var_key] = var_value;
-        i++;
+    //for every argument validate that it is an enviroment var and delete, stop at error
+    string cmd_s = _trim((string)cmd_line);
+    cmd_s = cmd_s.substr(8, cmd_s.length());
+    vector<string> unwanted_vars;
+    while (true){
+        cmd_s = _trim(cmd_s);
+        int arg_idx = cmd_s.find_first_of(" \n");
+        string unwanted_var = cmd_s.substr(0, arg_idx);
+        if (vars.find(unwanted_var) == vars.end()){
+            deleteEnviromentVars(unwanted_vars);
+            cerr <<  "smash error: unsetenv: "<< unwanted_var << " does not exist" << endl;
+            return;
+        }
+        unwanted_vars.push_back(unwanted_var);
+        if (arg_idx == string :: npos){
+            break;
+        }
+        cmd_s = cmd_s.substr(arg_idx, cmd_s.length());
     }
-    cout << "finished with the map" << endl;
-*/
+    deleteEnviromentVars(unwanted_vars);
+}
 
-
-
-
-/*
-
+void UnSetEnvCommand::deleteEnviromentVars(vector<string> &unwanted_vars) {
     //check for each argument if it is an enviroment variable,
     // if so - we will delete it from the set, if not - an error will be returned
+    unwanted_vars.emplace_back("");
     for(const auto & var : unwanted_vars){
-        auto it = enviroment_vars.find(var);
-        if(it != enviroment_vars.end()){
-           enviroment_vars.erase(it);
+        auto it = vars.find(var);
+        if(it != vars.end()){
+            vars.erase(it);
         } else {
             cerr <<  "smash error: unsetenv: "<< var << "does not exist" << endl;
         }
     }
-    cout << "finished removing" << endl;
+
 
     //update environ array according to remaining variables in enviroment_vars
-    i = 0;
-    for(auto& pair : enviroment_vars){
-        environ[i] = new char(pair.second.length() + pair.first.length());
+    int i = 0;
+    for(auto& pair : vars){
         string str = pair.first + pair.second;
+        int length = str.length();
+        environ[i] = new char(length + 1);
         strcpy(environ[i],str.c_str());
+        cout << environ[i] << endl;
         i++;
     }
 
-
     environ[i] = nullptr;
-
-    cout << environ[1] << endl;
-    cout << "finished updating" << endl;
-    */
 }
+
 
 enum CommandState {BG, FG};
 void ExternalCommand::execute() {
@@ -523,17 +533,17 @@ void ExternalCommand::executeComplex() {
     //check if last char is ampersand
     if(orig_line[orig_line.length() - 1] == '&'){
         cmd_state = BG;
+        orig_line[orig_line.length() - 1] = '\0';
     }
     //fork the process
     int pid = fork();
-    //add to job list if necessary
-
     if (pid == 0){
         setpgrp();
         execv(complex_path.c_str(), argv);
     } else if (cmd_state == FG) {
         wait(NULL);
-    } else if (cmd_state == BG){
+    } //add to job list if necessary
+    else if (cmd_state == BG){
         SmallShell::getInstance().getJobs()->addJob(pid, original_line);
     }
 }
