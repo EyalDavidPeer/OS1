@@ -323,7 +323,11 @@ public:
         SmallShell::name = name;
     }
 
-    void setPlast(char * pwd) {
+    void setPlast(char* pwd) {
+
+        if (plastPwd != nullptr) {
+            free(plastPwd);
+        }
         plastPwd = pwd;
     }
 

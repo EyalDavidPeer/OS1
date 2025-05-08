@@ -125,12 +125,19 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   if(SmallShell::isRedirection(cmd_line)){
         return new RedirectionCommand(cmd_line);
   }
-
   if(SmallShell::isPipe(cmd_line)){
         return new PipeCommand(cmd_line);
   }
   if (firstWord.compare("pwd") == 0 || firstWord.compare("pwd&") == 0){
     return new GetCurrDirCommand(cmd_line);
+  }
+
+    if(firstWord.compare("du") == 0 || firstWord.compare("du&") == 0){
+        return new DiskUsageCommand(cmd_line);
+    }
+
+  if (firstWord.compare("whoami") == 0 || firstWord.compare("whoami&") == 0){
+        return new WhoAmICommand(cmd_line);
   }
   else if (firstWord.compare("showpid") == 0 || firstWord.compare("showpid&") == 0 ) {
     return new ShowPidCommand(cmd_line);
@@ -294,17 +301,14 @@ struct Stat {
 };
 
 void WatchProcCommand::execute() {
-    // Extract and validate PID
     string cmd_line_str = _trim(string(this->cmd_line));
-    string pid_str = _trim(cmd_line_str.substr(9)); // Remove "watchproc "
+    string pid_str = _trim(cmd_line_str.substr(9));
 
-    // Check for empty argument
     if (pid_str.empty()) {
         cerr << "smash error: watchproc: invalid arguments" << endl;
         return;
     }
 
-    // Validate PID is numeric
     for (char c: pid_str) {
         if (!isdigit(c)) {
             cerr << "smash error: watchproc: invalid arguments" << endl;
@@ -314,88 +318,133 @@ void WatchProcCommand::execute() {
 
     int pid = stoi(pid_str);
 
-    // Read CPU usage data from /proc/[pid]/stat
     string stat_path = "/proc/" + pid_str + "/stat";
-    istringstream stat_file(stat_path);
-    if (!stat_file) {
-        cerr << "smash error: watchproc: pid " << pid << " does not exist"
-             << endl;
+    int stat_fd = open(stat_path.c_str(), O_RDONLY);
+    if (stat_fd == -1) {
+        cerr << "smash error: watchproc: pid " << pid << " does not exist" << endl;
         return;
     }
 
-    string stat_line;
-    getline(stat_file, stat_line);
+    const int BUFFER_SIZE = 2048;
+    char buffer[BUFFER_SIZE];
+    memset(buffer, 0, BUFFER_SIZE);
 
-    // Parse stat file data
-    vector<string> stat_values;
+    ssize_t bytes_read = read(stat_fd, buffer, BUFFER_SIZE - 1);
+    close(stat_fd);
+
+    if (bytes_read <= 0) {
+        cerr << "smash error: watchproc: can't read process stats" << endl;
+        return;
+    }
+
+    buffer[bytes_read] = '\0';
+    string stat_line(buffer);
+
     size_t pos = stat_line.find(')');
     if (pos == string::npos) {
-        cerr << "smash error: watchproc: pid " << pid << " does not exist"
-             << endl;
+        cerr << "smash error: watchproc: pid " << pid << " does not exist" << endl;
         return;
     }
 
-    string remainder = stat_line.substr(pos + 2); // Skip past "process_name) "
+    string remainder = stat_line.substr(pos + 2);
     istringstream stat_stream(remainder);
     string value;
 
-    // Skip state
     stat_stream >> value;
 
-    // Skip to usermode time (14th field, but we already consumed 3)
     for (int i = 0; i < 10; i++) {
-        stat_stream >> value;
+        if (!(stat_stream >> value)) {
+            cerr << "smash error: watchproc: can't read process stats" << endl;
+            return;
+        }
     }
-
-    // Get utime, stime, and starttime
-    long utime, stime, starttime;
-    stat_stream >> utime >> stime;
-
-    // Skip to starttime (22nd field)
-    for (int i = 0; i < 7; i++) {
-        stat_stream >> value;
-    }
-    stat_stream >> starttime;
-
-    // Get system uptime
-    istringstream uptime_file("/proc/uptime");
-    if (!uptime_file) {
-        cerr << "smash error: watchproc: pid " << pid << " does not exist"
-             << endl;
+    unsigned long utime = 0, stime = 0, starttime = 0;
+    if (!(stat_stream >> utime >> stime)) {
+        cerr << "smash error: watchproc: can't read process CPU stats" << endl;
         return;
     }
 
-    double system_uptime;
-    uptime_file >> system_uptime;
+    for (int i = 0; i < 7; i++) {
+        if (!(stat_stream >> value)) {
+            cerr << "smash error: watchproc: can't read process stats" << endl;
+            return;
+        }
+    }
 
-    // Calculate CPU usage
+    if (!(stat_stream >> starttime)) {
+        cerr << "smash error: watchproc: can't read process start time" << endl;
+        return;
+    }
+
+    int uptime_fd = open("/proc/uptime", O_RDONLY);
+    if (uptime_fd == -1) {
+        cerr << "smash error: watchproc: can't read system uptime" << endl;
+        return;
+    }
+
+    memset(buffer, 0, BUFFER_SIZE);
+    bytes_read = read(uptime_fd, buffer, BUFFER_SIZE - 1);
+    close(uptime_fd);
+
+    if (bytes_read <= 0) {
+        cerr << "smash error: watchproc: can't read system uptime" << endl;
+        return;
+    }
+
+    buffer[bytes_read] = '\0';
+    istringstream uptime_stream(buffer);
+    double system_uptime = 0.0;
+    uptime_stream >> system_uptime;
+
     long clock_ticks = sysconf(_SC_CLK_TCK);
-    double process_runtime = system_uptime - (starttime / (double)clock_ticks);
-    double cpu_time_seconds = (utime + stime) / (double)clock_ticks;
+    double process_runtime = system_uptime - (starttime / static_cast<double>(clock_ticks));
+    double cpu_time_seconds = (utime + stime) / static_cast<double>(clock_ticks);
     double cpu_percent = 0.0;
 
     if (process_runtime > 0) {
         cpu_percent = 100.0 * (cpu_time_seconds / process_runtime);
     }
 
-    // Get memory usage from /proc/[pid]/status
     string status_path = "/proc/" + pid_str + "/status";
-    istringstream status_file(status_path);
-    if (!status_file) {
-        cerr << "smash error: watchproc: pid " << pid << " does not exist"
-             << endl;
+    int status_fd = open(status_path.c_str(), O_RDONLY);
+
+    if (status_fd == -1) {
+        cerr << "smash error: watchproc: pid " << pid << " does not exist" << endl;
         return;
     }
+
+    memset(buffer, 0, BUFFER_SIZE);
+    bytes_read = read(status_fd, buffer, BUFFER_SIZE - 1);
+    close(status_fd);
+
+    if (bytes_read <= 0) {
+        cerr << "smash error: watchproc: can't read process memory stats" << endl;
+        return;
+    }
+
+    buffer[bytes_read] = '\0';
+    string status_content(buffer);
+
+    // Find VmRSS line
     double memory_kb = 0.0;
+    bool found_memory = false;
+    istringstream status_stream(status_content);
     string line;
-    while (getline(status_file, line)) {
+
+    while (getline(status_stream, line)) {
         if (line.find("VmRSS:") == 0) {
             istringstream line_stream(line);
             string label;
             line_stream >> label >> memory_kb;
+            found_memory = true;
             break;
         }
     }
+
+    if (!found_memory) {
+        memory_kb = 0.0;
+    }
+
     double memory_mb = memory_kb / 1024.0;
 
     cout << fixed << setprecision(1);
@@ -509,57 +558,66 @@ void ShowPidCommand::execute() {
 
 void ChangeDirCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
-    string tmp = cmd_s.substr(2); //cd length is 2
+    string tmp = cmd_s.substr(2); // cd length is 2
     cmd_s = _trim(tmp);
+
     const int LENGTH = 1024;
-    char *old = new char(LENGTH);
+    char *old = new char[LENGTH];
     if (getcwd(old, LENGTH) == nullptr) {
-//        perror("getcwd");
+        perror("smash error: getcwd");
+        delete[] old;
         return;
     }
-    string secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
+    string secondWord = cmd_s;
     if (cmd_s.find(' ') != std::string::npos) {
-        cout << "smash error: cd: too many arguments" << endl;
-        return;
+        secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+        if (cmd_s.substr(secondWord.length()).find_first_not_of(" \t\n") != std::string::npos) {
+            cout << "smash error: cd: too many arguments" << endl;
+            delete[] old;
+            return;
+        }
     }
+
     if (cmd_s == "-") {
-        char **oldPwd = this->m_plastPwd;
-        char *currentDir = new char(LENGTH);
-        if (getcwd(currentDir, LENGTH) == nullptr) {
-            perror("getcwd");
-            return;
-        }
-        if (!oldPwd || !*oldPwd) {
+        if (!m_plastPwd || !(*m_plastPwd)) {
             cout << "smash error: cd: OLDPWD not set" << endl;
+            delete[] old;
             return;
         }
 
-//        printf("The prev dir is: %s\n",**oldPwd);
-        chdir(*oldPwd);
-        SmallShell::getInstance().setPlast(strdup(currentDir));
-        free(currentDir);
+        if (chdir(*m_plastPwd) == -1) {
+            perror("smash error: chdir");
+            delete[] old;
+            return;
+        }
+
+        SmallShell::getInstance().setPlast(strdup(old));
+        delete[] old;
         return;
-    } else {
+    } else if (!cmd_s.empty()) {
+
         const char *dest = secondWord.c_str();
-
-
         if (chdir(dest) == -1) {
             std::string altPath = std::string(dest) + "/";
             if (chdir(altPath.c_str()) == -1) {
+                perror("smash error: chdir");
+                delete[] old;
                 return;
             }
         }
+    } else {
+        delete[] old;
+        return;
     }
-//    *m_plastPwd = old;
+
     SmallShell::getInstance().setPlast(strdup(old));
-    free(old);
+    delete[] old;
 }
 
 void GetCurrDirCommand::execute() {
     int size = 100;
     char *pathName = new char(size);
-    ///Allocate more memory if the path is too long
     while(getcwd(pathName,size) == nullptr){
         char* tmp = pathName;
         size *= 2;
@@ -598,10 +656,6 @@ void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
     max_id++;
     cout << endl;
 
-
-    //add job entry to job list
-
-    //check if sigchld handler works
 
 }
 
@@ -1008,7 +1062,6 @@ void PipeCommand::execute() {
 
     pid_t pid1 = fork();
     if (pid1 == -1) {
-        setpgrp();
         perror("smash error: fork");
         close(fd[0]);
         close(fd[1]);
@@ -1016,8 +1069,8 @@ void PipeCommand::execute() {
     }
 
     if (pid1 == 0) {
+        setpgrp();
         if (dup2(fd[1], STDOUT_FILENO) == -1) {
-            setpgrp();
             perror("dup2");
             exit(errno);
         }
@@ -1036,10 +1089,10 @@ void PipeCommand::execute() {
     pid_t pid2 = fork();
 
     if (pid2 == -1) {
-        setpgrp();
         perror("smash error: fork");
         close(fd[0]);
         close(fd[1]);
+        waitpid(pid1, nullptr, 0); // Wait for first child to avoid zombie
         return;
     }
     if (pid2 == 0) {
@@ -1051,7 +1104,7 @@ void PipeCommand::execute() {
         close(fd[0]);
         close(fd[1]);
 
-        Command *cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
+        Command *cmd = SmallShell::getInstance().CreateCommand(rhs.c_str());
         cmd->execute();
         exit(errno);
     }
@@ -1062,7 +1115,6 @@ void PipeCommand::execute() {
     waitpid(pid2, nullptr, 0);
 }
 
-// Required for using getdents64 syscall
 struct linux_dirent64 {
     ino64_t d_ino;
     off64_t d_off;
@@ -1072,15 +1124,20 @@ struct linux_dirent64 {
 };
 
 long calculate_disk_usage(const std::string &path) {
+
     int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY);
     if (fd < 0) {
         return -1;
     }
 
-    const int BUF_SIZE = 1024;
+    const int BUF_SIZE = 4096; // Increased buffer size for better performance
     char buf[BUF_SIZE];
     long total_kb = 0;
 
+    struct stat dir_stat;
+    if (lstat(path.c_str(), &dir_stat) == 0) {
+        total_kb += (dir_stat.st_blocks * 512) / 1024;
+    }
     while (true) {
         int nread = syscall(SYS_getdents64, fd, buf, BUF_SIZE);
         if (nread == -1) {
@@ -1089,18 +1146,27 @@ long calculate_disk_usage(const std::string &path) {
         }
 
         if (nread == 0) {
-            break;
+            break; // End of directory
         }
 
         for (int bpos = 0; bpos < nread;) {
             struct linux_dirent64 *d = (struct linux_dirent64 *)(buf + bpos);
-            string name = d->d_name;
+            std::string name = d->d_name;
 
-            if (name != "." && name != "..") { continue; }
-            std::string full_path = path + "/" + name;
-            struct stat st{};
+            // Skip . and .. directories - CRITICAL FIX: Was incorrectly skipping everything except . and ..
+            if (name == "." || name == "..") {
+                bpos += d->d_reclen;
+                continue;
+            }
+
+            std::string full_path = path;
+            if (path[path.length() - 1] != '/') {
+                full_path += "/";
+            }
+            full_path += name;
+
+            struct stat st;
             if (lstat(full_path.c_str(), &st) == 0) {
-                // Add block size (convert to KB)
                 total_kb += (st.st_blocks * 512) / 1024;
 
                 if (S_ISDIR(st.st_mode)) {
@@ -1110,36 +1176,39 @@ long calculate_disk_usage(const std::string &path) {
                     }
                 }
             }
+
+            bpos += d->d_reclen;
         }
     }
+
     close(fd);
     return total_kb;
 }
 
 void DiskUsageCommand::execute() {
-    /* 0. split the user line -> argv / argc (course helper) */
+
     char *argv[COMMAND_MAX_ARGS];
-    int argc = _parseCommandLine(this->cmd_line, argv);
+    int argc = _parseCommandLine(this->cmd_line, argv); // Fixed: cmd*line -> cmd_line
 
     if (argc > 2) {
         std::cerr << "smash error: du: too many arguments" << std::endl;
+        for (int i = 0; i < argc; i++) {
+            free(argv[i]);
+        }
         return;
     }
-
-    // Get target path
     std::string path = (argc == 1) ? "." : argv[1];
 
-    // Calculate disk usage
     long size_kb = calculate_disk_usage(path);
 
-    // Check for errors
-    if (size_kb < 0) {
-        std::cerr << "smash error: du: directory " << path << " does not exist"
-                  << std::endl;
-        return;
+    for (int i = 0; i < argc; i++) {
+        free(argv[i]);
     }
 
-    // Display result
+    if (size_kb < 0) {
+        std::cerr << "smash error: du: directory " << path << " does not exist" << std::endl;
+        return;
+    }
     std::cout << "Total disk usage: " << size_kb << " KB" << std::endl;
 }
 
