@@ -107,7 +107,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
   //handle case where first word is alias
 
-
   if(SmallShell::getInstance().isAlias(firstWord)){
       //get real name of alias
       string real_name = SmallShell::getInstance().getRealNamefromAlias(firstWord);
@@ -120,7 +119,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
       cmd_line = real_line;
       firstWord = real_name.substr(0,real_name.find_first_of(" \n"));
   }
-
 
   if(SmallShell::isRedirection(cmd_line)){
         return new RedirectionCommand(cmd_line);
@@ -151,8 +149,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   else if (firstWord.compare("fg") == 0 || firstWord.compare("fg&") == 0){
      return new ForegroundCommand(cmd_line,getInstance().jobs);
  }
-
-//TODO: check kill,watchproc
 
   else if (firstWord.compare("kill") == 0){
     return new KillCommand(cmd_line,getInstance().jobs);
