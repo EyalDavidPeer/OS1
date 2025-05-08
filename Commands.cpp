@@ -425,11 +425,12 @@ void KillCommand::execute() {
         return;
     }
 
-    JobsList::JobEntry* job = SmallShell::getInstance().getJobs()->job_map[job_id];
-    if (!job) {
+    auto it = SmallShell::getInstance().getJobs()->job_map.find(job_id);
+    if (it == SmallShell::getInstance().getJobs()->job_map.end()) {
         std::cerr << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
         return;
     }
+    auto job = it->second;
     int pid = job->pid;
     if (kill(pid, sig) == -1) {
         perror("smash error: kill failed");
