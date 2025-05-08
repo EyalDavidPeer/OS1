@@ -496,35 +496,38 @@ void ForegroundCommand::execute() {
     }
     int job_id;
 
-    try{
-        job_id = stoi(args[1]);
-    }
-    catch (...){
-        std::cerr << "smash error: fg: invalid arguments" << std::endl;
-        return;
-    }
 
-    JobsList::JobEntry* job = nullptr;
-    if (args.size() == 1) {
+
+    if(args.size() == 1) {
         if (m_jobs->job_map.empty()) {
             std::cerr << "smash error: fg: jobs list is empty" << std::endl;
             return;
+        } else {
+            job_id = m_jobs->max_id;
         }
     } else {
-
-        job = m_jobs->job_map[job_id];
-        if (!job) {
-            std::cerr << "smash error: fg: job-id " << job_id << " does not exist" << std::endl;
+        try{
+            job_id = stoi(args[1]);
+        }
+        catch (...){
+            std::cerr << "smash error: fg: invalid arguments" << std::endl;
             return;
         }
     }
-    std::cout << job->cmd_line << " : " << job->pid << std::endl;
-
-    int status;
-    if (waitpid(job->pid, &status, WUNTRACED) == -1) {
-        //case failed
+    auto it = m_jobs->job_map.find(job_id);
+    if (it == m_jobs->job_map.end()) {
+        std::cerr << "smash error: fg: job-id " << job_id << " does not exist" << std::endl;
         return;
     }
+    auto job = it->second;
+    int pid = job->pid;
+    std::cout << job->cmd_line << " " << pid << std::endl;
+    SmallShell::getInstance().setForegroundPid(pid);
+    int status;
+    waitpid(pid, &status, WUNTRACED);
+
+    SmallShell::getInstance().setForegroundPid(-1);
+
     //removes from joblist
     if (WIFEXITED(status) || WIFSIGNALED(status)) {
         m_jobs->removeJobById(job_id);
@@ -652,8 +655,6 @@ void JobsList::addJob(int pid, const string &cmd_line, bool isStopped) {
     job_map[id] = job;
     pid_to_id_map[pid] = id;
     max_id++;
-    cout << endl;
-
 
 }
 
@@ -842,10 +843,6 @@ void UnSetEnvCommand::deleteEnviromentVars(unordered_set<string> &unwanted_vars)
         swap(environ[idx], environ[end]);
         environ[end] = nullptr;
         end--;
-    }
-
-    for (int i = 0; environ[i] != nullptr; i++){
-        cout << environ[i] << endl;
     }
 }
 
