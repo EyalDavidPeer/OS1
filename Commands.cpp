@@ -747,6 +747,11 @@ void UnSetEnvCommand::execute() {
     string cmd_s = _trim((string)cmd_line);
     cmd_s = cmd_s.substr(8, cmd_s.length());
     unordered_set<string> unwanted_vars;
+    cmd_s = _trim(cmd_s);
+    if(cmd_s == ""){
+        cerr << "smash error: unsetenv: not enough arguments" << endl;
+        return;
+    }
     while (true){
         cmd_s = _trim(cmd_s);
         int arg_idx = cmd_s.find_first_of(" \n");
@@ -785,6 +790,10 @@ void UnSetEnvCommand::deleteEnviromentVars(unordered_set<string> &unwanted_vars)
         swap(environ[idx], environ[end]);
         environ[end] = nullptr;
         end--;
+    }
+
+    for (int i = 0; environ[i] != nullptr; i++){
+        cout << environ[i] << endl;
     }
 }
 
@@ -889,18 +898,24 @@ void ExternalCommand::executeComplex() {
 
 
 bool SmallShell::isRedirection(const char *cmdLine) {
-    int i = 0;
-    while (cmdLine[i] != '\0') {
-        if (cmdLine[i] == '>') {
-            int j = i;
-            while (cmdLine[j] == '>') {
-                j++;
-            }
-            return j - i;
-        }
-        i++;
+    string cmd_s = _trim(cmdLine);
+    if(cmd_s.find_first_of(">>") != string::npos || cmd_s.find_first_of('>') != string::npos){
+        return true;
     }
-    return (i == 1 || i == 2);
+    return false;
+
+//    int i = 0;
+//    while (cmdLine[i] != '\0') {
+//        if (cmdLine[i] == '>') {
+//            int j = i;
+//            while (cmdLine[j] == '>') {
+//                j++;
+//            }
+//            return j - i;
+//        }
+//        i++;
+//    }
+//    return (i == 1 || i == 2);
 }
 
 bool SmallShell::isPipe(const char *cmdLine) {
