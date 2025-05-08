@@ -147,9 +147,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
 //TODO: check kill,watchproc
 
-//  else if (firstWord.compare("kill") == 0){
-//    return new KillCommand(cmd_line,getInstance().jobs);
-// }
+  else if (firstWord.compare("kill") == 0){
+    return new KillCommand(cmd_line,getInstance().jobs);
+ }
 
   else if (firstWord.compare("jobs") == 0 || firstWord.compare("jobs&") == 0){
       return new JobsCommand(cmd_line, this->jobs);
@@ -404,38 +404,39 @@ void WatchProcCommand::execute() {
 }
 
 
-//void KillCommand::execute() {
-//    std::string cmd_line_str = _trim(cmd_line);
-//
-//    //TODO: replace the _parse method to _parseCommandLine method provided
-//    std::vector<std::string> args = _parse(cmd_line_str);
-//
-//    if (args.size() != 3 || args[1][0] != '-') {
-//        std::cerr << "smash error: kill: invalid arguments" << std::endl;
-//        return;
-//    }
-//
-//    int sig;
-//    int job_id;
-//    try {
-//        sig = std::stoi(args[1].substr(1));
-//        job_id = std::stoi(args[2].substr(1));
-//    } catch (...) {
-//        std::cerr << "smash error: kill: invalid arguments" << std::endl;
-//        return;
-//    }
-//
-//    JobsList::JobEntry* job = SmallShell::getInstance().getJobs()->getJobById(job_id);
-//    if (!job) {
-//        std::cerr << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
-//        return;
-//    }
-//    if (kill(job->pid, sig) == -1) {
-//        perror("smash error: kill failed");
-//        return;
-//    }
-//    std::cout << "signal number " << sig << " was sent to pid " << job->pid << std::endl;
-//}
+void KillCommand::execute() {
+    std::string cmd_line_str = _trim(cmd_line);
+
+    //TODO: replace the _parse method to _parseCommandLine method provided
+    std::vector<std::string> args = _parse(cmd_line_str);
+
+    if (args.size() != 3 || args[1][0] != '-') {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
+    }
+
+    int sig;
+    int job_id;
+    try {
+        sig = std::stoi(args[1].substr(1));
+        job_id = std::stoi(args[2]);
+    } catch (...) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
+    }
+
+    JobsList::JobEntry* job = SmallShell::getInstance().getJobs()->job_map[job_id];
+    if (!job) {
+        std::cerr << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
+        return;
+    }
+    int pid = job->pid;
+    if (kill(pid, sig) == -1) {
+        perror("smash error: kill failed");
+        return;
+    }
+    std::cout << "signal number " << sig << " was sent to pid " << pid << std::endl;
+}
 
 void ForegroundCommand::execute() {
     std::string cmd_line_str = _trim(cmd_line);
