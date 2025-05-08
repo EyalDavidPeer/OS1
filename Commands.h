@@ -323,6 +323,10 @@ public:
         SmallShell::name = name;
     }
 
+    void setPlast(char * pwd) {
+        plastPwd = pwd;
+    }
+
     JobsList* getJobs(){
         return jobs;
     }

@@ -141,10 +141,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   else if (firstWord.compare("chprompt") == 0 || firstWord.compare("chprompt&") == 0){
       return new ChangePromptCommand(cmd_line);
   }
-
-//  else if (firstWord.compare("fg") == 0 || firstWord.compare("fg&") == 0){
-//     return new ForegroundCommand(cmd_line,getInstance().jobs);
-// }
+  else if (firstWord.compare("fg") == 0 || firstWord.compare("fg&") == 0){
+     return new ForegroundCommand(cmd_line,getInstance().jobs);
+ }
 
 //TODO: check kill,watchproc
 
@@ -161,9 +160,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   else if (firstWord.compare("alias") == 0){
       return new AliasCommand(cmd_line);
   }
-//  else if (firstWord.compare("unsetenv") == 0 || firstWord.compare("unsetenv&") == 0){
-//      return new UnSetEnvCommand(cmd_line);
-//  }
+
+  else if (firstWord.compare("unsetenv") == 0 || firstWord.compare("unsetenv&") == 0){
+      return new UnSetEnvCommand(cmd_line);
+  }
 
   else if (firstWord.compare("unalias") == 0){
       return new UnAliasCommand(cmd_line);
@@ -282,15 +282,15 @@ void UnAliasCommand::execute() {
 }
 
 struct Stat {
-    pid_t               pid{};          // 1
-    std::string         comm;           // 2   (can hold spaces)
-    char                state{};        // 3
-    pid_t               ppid{};         // 4
-    pid_t               pgrp{};         // 5
-    unsigned long       utime{};        // 14  user‑mode ticks
-    unsigned long       stime{};        // 15  kernel‑mode ticks
-    long                rss{};          // 24  resident pages
-    unsigned long long  starttime{};    // 22  ticks since boot
+    pid_t               pid{};
+    std::string         comm;
+    char                state{};
+    pid_t               ppid{};
+    pid_t               pgrp{};
+    unsigned long       utime{};
+    unsigned long       stime{};
+    long                rss{};
+    unsigned long long  starttime{};
 };
 
 void WatchProcCommand::execute() {
@@ -437,48 +437,55 @@ void WatchProcCommand::execute() {
 //    std::cout << "signal number " << sig << " was sent to pid " << job->pid << std::endl;
 //}
 
-//void ForegroundCommand::execute() {
-//    int job_id = -1;
-//    std::string cmd_line_str = _trim(cmd_line);
-//
-//    //TODO: replace the _parse method to _parseCommandLine method provided
-//    std::vector<std::string> args = _parse(cmd_line_str);
-//
-//    if (args.size() > 2) {
-//        std::cerr << "smash error: fg: invalid arguments" << std::endl;
-//        return;
-//    }
-//
-//    JobsList::JobEntry* job = nullptr;
-//    if (args.size() == 1) {
-//        job = m_jobs->getLastStoppedJob();
-//        if (!job) {
-//            std::cerr << "smash error: fg: jobs list is empty" << std::endl;
-//            return;
-//        }
-//    } else {
-//
-//        job = m_jobs->getJobById(job_id);
-//        if (!job) {
-//            std::cerr << "smash error: fg: job-id " << job_id << " does not exist" << std::endl;
-//            return;
-//        }
-//    }
-//    std::cout << job->cmd_line << " : " << job->pid << std::endl;
-//
-//    int status;
-//    if (waitpid(job->pid, &status, WUNTRACED) == -1) {
-//        //case failed
-//        return;
-//    }
-//    //removes from joblist
-//    if (WIFEXITED(status) || WIFSIGNALED(status)) {
-//        m_jobs->removeJobById(job_id);
-//        //for cases user stopped it
-//    } else if (WIFSTOPPED(status)) {
-//        job->isStopped = true;
-//    }
-//}
+void ForegroundCommand::execute() {
+    std::string cmd_line_str = _trim(cmd_line);
+
+    //TODO: replace the _parse method to _parseCommandLine method provided
+    std::vector<std::string> args = _parse(cmd_line_str);
+
+    if (args.size() > 2) {
+        std::cerr << "smash error: fg: invalid arguments" << std::endl;
+        return;
+    }
+    int job_id;
+
+    try{
+        job_id = stoi(args[1]);
+    }
+    catch (...){
+        std::cerr << "smash error: fg: invalid arguments" << std::endl;
+        return;
+    }
+
+    JobsList::JobEntry* job = nullptr;
+    if (args.size() == 1) {
+        if (m_jobs->job_map.empty()) {
+            std::cerr << "smash error: fg: jobs list is empty" << std::endl;
+            return;
+        }
+    } else {
+
+        job = m_jobs->job_map[job_id];
+        if (!job) {
+            std::cerr << "smash error: fg: job-id " << job_id << " does not exist" << std::endl;
+            return;
+        }
+    }
+    std::cout << job->cmd_line << " : " << job->pid << std::endl;
+
+    int status;
+    if (waitpid(job->pid, &status, WUNTRACED) == -1) {
+        //case failed
+        return;
+    }
+    //removes from joblist
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        m_jobs->removeJobById(job_id);
+        //for cases user stopped it
+    } else if (WIFSTOPPED(status)) {
+        job->isStopped = true;
+    }
+}
 
 void ChangePromptCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
@@ -504,8 +511,9 @@ void ChangeDirCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
     string tmp = cmd_s.substr(2); //cd length is 2
     cmd_s = _trim(tmp);
-    char *old = new char(1024);
-    if (getcwd(old, 1024) == nullptr) {
+    const int LENGTH = 1024;
+    char *old = new char(LENGTH);
+    if (getcwd(old, LENGTH) == nullptr) {
 //        perror("getcwd");
         return;
     }
@@ -517,8 +525,8 @@ void ChangeDirCommand::execute() {
     }
     if (cmd_s == "-") {
         char **oldPwd = this->m_plastPwd;
-        char *currentDir = new char(1024);
-        if (getcwd(currentDir, 1024) == nullptr) {
+        char *currentDir = new char(LENGTH);
+        if (getcwd(currentDir, LENGTH) == nullptr) {
             perror("getcwd");
             return;
         }
@@ -526,8 +534,10 @@ void ChangeDirCommand::execute() {
             cout << "smash error: cd: OLDPWD not set" << endl;
             return;
         }
+
+//        printf("The prev dir is: %s\n",**oldPwd);
         chdir(*oldPwd);
-        *m_plastPwd = currentDir;
+        SmallShell::getInstance().setPlast(strdup(currentDir));
         free(currentDir);
         return;
     } else {
@@ -541,7 +551,8 @@ void ChangeDirCommand::execute() {
             }
         }
     }
-    *m_plastPwd = old;
+//    *m_plastPwd = old;
+    SmallShell::getInstance().setPlast(strdup(old));
     free(old);
 }
 
@@ -982,6 +993,7 @@ void PipeCommand::execute() {
 
     pid_t pid1 = fork();
     if (pid1 == -1) {
+        setpgrp();
         perror("smash error: fork");
         close(fd[0]);
         close(fd[1]);
@@ -990,6 +1002,7 @@ void PipeCommand::execute() {
 
     if (pid1 == 0) {
         if (dup2(fd[1], STDOUT_FILENO) == -1) {
+            setpgrp();
             perror("dup2");
             exit(errno);
         }
@@ -1008,12 +1021,14 @@ void PipeCommand::execute() {
     pid_t pid2 = fork();
 
     if (pid2 == -1) {
+        setpgrp();
         perror("smash error: fork");
         close(fd[0]);
         close(fd[1]);
         return;
     }
     if (pid2 == 0) {
+        setpgrp();
         if (dup2(fd[0], STDIN_FILENO) == -1) {
             perror("dup2");
             exit(errno);

@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
-project(clionProject)
+project(OS1)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_executable(
-        OS1/OS1/Commands.cpp
-        OS1/OS1/Commands.cpp
-        OS1/OS1/signals.cpp)
+add_executable(OS1
+        smash.cpp
+signals.cpp
+Commands.cpp)
