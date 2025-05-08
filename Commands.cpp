@@ -9,8 +9,10 @@
 #include <regex>
 #include "Commands.h"
 #include <fcntl.h>
-#include <fstream>
 #include <stdexcept>
+#include <sys/types.h>
+#include <sys/syscall.h>
+#include <sys/stat.h>
 
 
 using namespace std;
@@ -120,7 +122,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
   }
 
 
-  if(SmallShell::isArrows(cmd_line)){
+  if(SmallShell::isRedirection(cmd_line)){
         return new RedirectionCommand(cmd_line);
   }
 
@@ -134,7 +136,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     return new ShowPidCommand(cmd_line);
   }
   else if (firstWord.compare("cd") == 0 || firstWord.compare("cd&") == 0 ) {
-      return new ChangeDirCommand(cmd_line, plastPwd);
+      return new ChangeDirCommand(cmd_line, &getInstance().plastPwd);
   }
   else if (firstWord.compare("chprompt") == 0 || firstWord.compare("chprompt&") == 0){
       return new ChangePromptCommand(cmd_line);
@@ -279,7 +281,6 @@ void UnAliasCommand::execute() {
     }
 }
 
-
 struct Stat {
     pid_t               pid{};          // 1
     std::string         comm;           // 2   (can hold spaces)
@@ -292,103 +293,114 @@ struct Stat {
     unsigned long long  starttime{};    // 22  ticks since boot
 };
 
-
-
-bool read_stat(basic_string<char> pid, Stat& s)
-{
-    std::ifstream f("/proc/" + pid + "/stat");
-    if (!f) return false;
-
-    std::string line;
-    std::getline(f, line);
-
-    // 1. split out the "(comm)" portion first
-    std::size_t open  = line.find('(');
-    std::size_t close = line.rfind(')');
-    if (open == std::string::npos || close == std::string::npos || close < open)
-        return false;
-
-    std::string before = line.substr(0, open);                   // pid + space
-    std::string comm   = line.substr(open + 1, close - open - 1);
-    std::string after  = line.substr(close + 2);                 // skips ") "
-
-    {
-        std::istringstream iss(before);
-        iss >> s.pid;                                            // field #1
-    }
-    s.comm = comm;
-
-    // tokenise the remainder (field #3 onward)
-    std::istringstream iss(after);
-    std::vector<std::string> tok;
-    for (std::string t; iss >> t; ) tok.push_back(t);
-    if (tok.size() < 24) return false;                           // sanity
-
-    s.state      = tok[0][0];                                    // #3
-    s.ppid       = std::stoi(tok[1]);                            // #4
-    s.pgrp       = std::stoi(tok[2]);                            // #5
-    s.utime      = std::stoul(tok[11]);                          // #14
-    s.stime      = std::stoul(tok[12]);                          // #15
-    s.starttime  = std::stoull(tok[19]);                         // #22
-    s.rss        = std::stol(tok[21]);                           // #24
-
-    return true;
-}
-
-
-double get_uptime_seconds()
-{
-    std::ifstream u("/proc/uptime");
-    double up = 0.0;
-    u >> up;
-    return up;
-}
-
-
-double percent_cpu(const Stat& s, long clk_tck, long n_cpus, double sys_uptime)
-{
-    const double total_time_sec = double(s.utime + s.stime) / clk_tck;
-    const double seconds_alive  = sys_uptime - double(s.starttime) / clk_tck;
-
-    if (seconds_alive <= 0.0) return 0.0;
-    return 100.0 * total_time_sec / seconds_alive * n_cpus;
-}
-
 void WatchProcCommand::execute() {
-    string cmd_s = _trim(string(this->cmd_line));
-    string tmp = cmd_s.substr(9,cmd_s.length()); //watchproc length is 9
-    //TODO: replace the _parse method to _parseCommandLine method provided
-    std::vector<std::string> args = _parse(tmp);
-    if(args.size() != 1){
-        cerr <<"smash error: watchproc: invalid arguments" <<endl;
+    // Extract and validate PID
+    string cmd_line_str = _trim(string(this->cmd_line));
+    string pid_str = _trim(cmd_line_str.substr(9)); // Remove "watchproc "
+
+    // Check for empty argument
+    if (pid_str.empty()) {
+        cerr << "smash error: watchproc: invalid arguments" << endl;
         return;
     }
 
-    try{
-        stoi(args[0]);
+    // Validate PID is numeric
+    for (char c: pid_str) {
+        if (!isdigit(c)) {
+            cerr << "smash error: watchproc: invalid arguments" << endl;
+            return;
+        }
     }
-    catch(...){
-        cerr <<"smash error: watchproc: invalid arguments" <<endl;
+
+    int pid = stoi(pid_str);
+
+    // Read CPU usage data from /proc/[pid]/stat
+    string stat_path = "/proc/" + pid_str + "/stat";
+    istringstream stat_file(stat_path);
+    if (!stat_file) {
+        cerr << "smash error: watchproc: pid " << pid << " does not exist"
+             << endl;
         return;
     }
 
-    const long CLK   = sysconf(_SC_CLK_TCK);
-    const long CPUS  = sysconf(_SC_NPROCESSORS_ONLN);
-    const long PAGE  = sysconf(_SC_PAGESIZE);
+    string stat_line;
+    getline(stat_file, stat_line);
 
-    Stat st;
-    if (!read_stat(args[0], st)) {
-        std::cerr << "smash error: watchproc: pid " << args[0] << " does not exist\n" << endl;
+    // Parse stat file data
+    vector<string> stat_values;
+    size_t pos = stat_line.find(')');
+    if (pos == string::npos) {
+        cerr << "smash error: watchproc: pid " << pid << " does not exist"
+             << endl;
         return;
     }
 
-    const double up      = get_uptime_seconds();
-    const double pcpu    = percent_cpu(st, CLK, CPUS, up);
-    const double mem_mb  = double(st.rss) * PAGE / (1024.0 * 1024.0);
+    string remainder = stat_line.substr(pos + 2); // Skip past "process_name) "
+    istringstream stat_stream(remainder);
+    string value;
 
-    std::cout << "PID: " << args[0]
-              << " | CPU Usage: "    << std::fixed << std::setprecision(1) << pcpu << '%'
-              << " | Memory Usage: " << std::setprecision(1) << mem_mb << " MB\n";
+    // Skip state
+    stat_stream >> value;
+
+    // Skip to usermode time (14th field, but we already consumed 3)
+    for (int i = 0; i < 10; i++) {
+        stat_stream >> value;
+    }
+
+    // Get utime, stime, and starttime
+    long utime, stime, starttime;
+    stat_stream >> utime >> stime;
+
+    // Skip to starttime (22nd field)
+    for (int i = 0; i < 7; i++) {
+        stat_stream >> value;
+    }
+    stat_stream >> starttime;
+
+    // Get system uptime
+    istringstream uptime_file("/proc/uptime");
+    if (!uptime_file) {
+        cerr << "smash error: watchproc: pid " << pid << " does not exist"
+             << endl;
+        return;
+    }
+
+    double system_uptime;
+    uptime_file >> system_uptime;
+
+    // Calculate CPU usage
+    long clock_ticks = sysconf(_SC_CLK_TCK);
+    double process_runtime = system_uptime - (starttime / (double)clock_ticks);
+    double cpu_time_seconds = (utime + stime) / (double)clock_ticks;
+    double cpu_percent = 0.0;
+
+    if (process_runtime > 0) {
+        cpu_percent = 100.0 * (cpu_time_seconds / process_runtime);
+    }
+
+    // Get memory usage from /proc/[pid]/status
+    string status_path = "/proc/" + pid_str + "/status";
+    istringstream status_file(status_path);
+    if (!status_file) {
+        cerr << "smash error: watchproc: pid " << pid << " does not exist"
+             << endl;
+        return;
+    }
+    double memory_kb = 0.0;
+    string line;
+    while (getline(status_file, line)) {
+        if (line.find("VmRSS:") == 0) {
+            istringstream line_stream(line);
+            string label;
+            line_stream >> label >> memory_kb;
+            break;
+        }
+    }
+    double memory_mb = memory_kb / 1024.0;
+
+    cout << fixed << setprecision(1);
+    cout << "PID: " << pid << " | CPU Usage: " << cpu_percent
+         << "% | Memory Usage: " << memory_mb << " MB" << endl;
 }
 
 
@@ -493,35 +505,33 @@ void ChangeDirCommand::execute() {
     string tmp = cmd_s.substr(2); //cd length is 2
     cmd_s = _trim(tmp);
     char *old = new char(1024);
-    if (getcwd(old, 1024) == NULL) {
-        perror("getcwd");
+    if (getcwd(old, 1024) == nullptr) {
+//        perror("getcwd");
         return;
     }
     string secondWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
-    if(cmd_s.find(' ') != std::string::npos){
-    cout << "smash error: cd: too many arguments" << endl;
-    return;
-}
-    if(cmd_s == "-"){
-        char** oldPwd = this->m_plastPwd;
-        char* currentDir = new char(1024);
-        if (getcwd(currentDir, 1024) == NULL) {
+    if (cmd_s.find(' ') != std::string::npos) {
+        cout << "smash error: cd: too many arguments" << endl;
+        return;
+    }
+    if (cmd_s == "-") {
+        char **oldPwd = this->m_plastPwd;
+        char *currentDir = new char(1024);
+        if (getcwd(currentDir, 1024) == nullptr) {
             perror("getcwd");
             return;
         }
-        if (!oldPwd || !*oldPwd){
+        if (!oldPwd || !*oldPwd) {
             cout << "smash error: cd: OLDPWD not set" << endl;
             return;
         }
         chdir(*oldPwd);
-        SmallShell::getInstance().setLastPwd(currentDir);
+        *m_plastPwd = currentDir;
         free(currentDir);
         return;
-    }
-
-    else{
-        const char* dest = secondWord.c_str();
+    } else {
+        const char *dest = secondWord.c_str();
 
 
         if (chdir(dest) == -1) {
@@ -531,9 +541,8 @@ void ChangeDirCommand::execute() {
             }
         }
     }
-    SmallShell::getInstance().setLastPwd(old);
+    *m_plastPwd = old;
     free(old);
-
 }
 
 void GetCurrDirCommand::execute() {
@@ -868,10 +877,10 @@ void ExternalCommand::executeComplex() {
 }
 
 
-bool SmallShell::isArrows(const char* cmdLine){
+bool SmallShell::isRedirection(const char *cmdLine) {
     int i = 0;
-    while (cmdLine[i] != '\0'){
-        if(cmdLine[i] == '>'){
+    while (cmdLine[i] != '\0') {
+        if (cmdLine[i] == '>') {
             int j = i;
             while (cmdLine[j] == '>') {
                 j++;
@@ -880,13 +889,13 @@ bool SmallShell::isArrows(const char* cmdLine){
         }
         i++;
     }
-    return (i==1 || i ==2);
+    return (i == 1 || i == 2);
 }
 
-bool SmallShell::isPipe(const char* cmdLine){
+bool SmallShell::isPipe(const char *cmdLine) {
     string cmd = cmdLine;
-    for(auto c : cmd){
-        if(c == '|'){
+    for (auto c: cmd) {
+        if (c == '|') {
             return true;
         }
     }
@@ -899,13 +908,13 @@ void RedirectionCommand::execute() {
     string cmd_s = _trim(string(this->cmd_line));
     string op;
     size_t pos = cmd_s.find(">>");
-    if(pos != string::npos){
+    if (pos != string::npos) {
         op = ">>";
-    } else{
+    } else {
         pos = cmd_s.find(">");
-        if(pos != string::npos){
+        if (pos != string::npos) {
             op = ">";
-        } else{
+        } else {
             return;
         }
     }
@@ -915,61 +924,35 @@ void RedirectionCommand::execute() {
 
     int fd;
 
-    if(op == ">>"){
+    if (op == ">>") {
         fd = open(rhs.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    }
-    else{
+    } else {
         fd = open(rhs.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     }
 
-    if(fd == -1){
+    if (fd == -1) {
         perror("smash error: open failed");
         return;
     }
 
-
-    pid_t pid = fork();
-    if (pid == -1) {
-        perror("smash error: fork");
-        close(fd);
+    int shellFd = dup(STDOUT_FILENO);
+    if (shellFd == -1) {
+        perror("smash error: dup failed");
         return;
     }
-
-    if (pid == 0) {
-        if (dup2(fd, STDOUT_FILENO) == -1) {
-            perror("smash error: dup2");
-            _exit(1);
-        }
-        close(fd);
-
-        SmallShell::getInstance().executeCommand(lhs.c_str());
-        exit(errno);
+    if (dup2(fd, STDOUT_FILENO) == -1) {
+        perror("smash error: dup2 failed");
+        close(shellFd);
+        return;
     }
     close(fd);
-    waitpid(pid, nullptr, 0);
+    const char *cmd_line = lhs.c_str();
+    SmallShell::getInstance().executeCommand(cmd_line);
 
-
-
-
-//    int shellFd = dup(STDOUT_FILENO);
-//    if (shellFd == -1) {
-//        perror("smash error: dup failed");
-//        return;
-//    }
-//    if (dup2(fd, STDOUT_FILENO) == -1) {
-//        perror("smash error: dup2 failed");
-//        close(shellFd);
-//        return;
-//    }
-//    close(fd);
-//    const char* cmd_line = lhs.c_str();
-//    SmallShell::getInstance().executeCommand(cmd_line);
-//
-//    if (dup2(shellFd, STDOUT_FILENO) == -1) {
-//        perror("smash error: dup2 failed");
-//    }
-//    close(shellFd);
-
+    if (dup2(shellFd, STDOUT_FILENO) == -1) {
+        perror("smash error: dup2 failed");
+    }
+    close(shellFd);
 }
 
 void PipeCommand::execute() {
@@ -980,14 +963,12 @@ void PipeCommand::execute() {
         op = "|&";
     } else {
         pos = cmd_s.find("|");
-        if (pos != string::npos){
+        if (pos != string::npos) {
             op = "|";
         }
     }
-
     string lhs = _trim(cmd_s.substr(0, pos));
     string rhs = _trim(cmd_s.substr(pos + op.length()));
-
     if (lhs.empty() || rhs.empty()) {
         std::cerr << "smash error: pipe: invalid arguments\n";
         return;
@@ -1008,16 +989,18 @@ void PipeCommand::execute() {
     }
 
     if (pid1 == 0) {
-        if (dup2(fd[1], STDOUT_FILENO) == -1) { perror("dup2");
+        if (dup2(fd[1], STDOUT_FILENO) == -1) {
+            perror("dup2");
             exit(errno);
         }
         if (op == "|&" && dup2(fd[1], STDERR_FILENO) == -1) {
             perror("dup2");
             exit(errno);
         }
-        close(fd[0]); close(fd[1]);
+        close(fd[0]);
+        close(fd[1]);
 
-        Command * cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
+        Command *cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
         cmd->execute();
         exit(errno);
     }
@@ -1031,10 +1014,14 @@ void PipeCommand::execute() {
         return;
     }
     if (pid2 == 0) {
-        if (dup2(fd[0], STDIN_FILENO) == -1) { perror("dup2"); _exit(1); }
-        close(fd[0]); close(fd[1]);
+        if (dup2(fd[0], STDIN_FILENO) == -1) {
+            perror("dup2");
+            exit(errno);
+        }
+        close(fd[0]);
+        close(fd[1]);
 
-        Command * cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
+        Command *cmd = SmallShell::getInstance().CreateCommand(lhs.c_str());
         cmd->execute();
         exit(errno);
     }
@@ -1043,9 +1030,183 @@ void PipeCommand::execute() {
 
     waitpid(pid1, nullptr, 0);
     waitpid(pid2, nullptr, 0);
-
-
 }
 
+// Required for using getdents64 syscall
+struct linux_dirent64 {
+    ino64_t d_ino;
+    off64_t d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[];
+};
+
+long calculate_disk_usage(const std::string &path) {
+    int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY);
+    if (fd < 0) {
+        return -1;
+    }
+
+    const int BUF_SIZE = 1024;
+    char buf[BUF_SIZE];
+    long total_kb = 0;
+
+    while (true) {
+        int nread = syscall(SYS_getdents64, fd, buf, BUF_SIZE);
+        if (nread == -1) {
+            close(fd);
+            return -1;
+        }
+
+        if (nread == 0) {
+            break;
+        }
+
+        for (int bpos = 0; bpos < nread;) {
+            struct linux_dirent64 *d = (struct linux_dirent64 *)(buf + bpos);
+            string name = d->d_name;
+
+            if (name != "." && name != "..") { continue; }
+            std::string full_path = path + "/" + name;
+            struct stat st{};
+            if (lstat(full_path.c_str(), &st) == 0) {
+                // Add block size (convert to KB)
+                total_kb += (st.st_blocks * 512) / 1024;
+
+                if (S_ISDIR(st.st_mode)) {
+                    long subdir_size = calculate_disk_usage(full_path);
+                    if (subdir_size >= 0) {
+                        total_kb += subdir_size;
+                    }
+                }
+            }
+        }
+    }
+    close(fd);
+    return total_kb;
+}
+
+void DiskUsageCommand::execute() {
+    /* 0. split the user line -> argv / argc (course helper) */
+    char *argv[COMMAND_MAX_ARGS];
+    int argc = _parseCommandLine(this->cmd_line, argv);
+
+    if (argc > 2) {
+        std::cerr << "smash error: du: too many arguments" << std::endl;
+        return;
+    }
+
+    // Get target path
+    std::string path = (argc == 1) ? "." : argv[1];
+
+    // Calculate disk usage
+    long size_kb = calculate_disk_usage(path);
+
+    // Check for errors
+    if (size_kb < 0) {
+        std::cerr << "smash error: du: directory " << path << " does not exist"
+                  << std::endl;
+        return;
+    }
+
+    // Display result
+    std::cout << "Total disk usage: " << size_kb << " KB" << std::endl;
+}
+
+
+void WhoAmICommand::execute() {
+    const uid_t my_uid = geteuid();
+    const std::string uid_text = std::to_string(my_uid);
+    std::string username;
+    std::string home;
+
+    if (const char *env_home = std::getenv("HOME")) {
+        home = env_home;
+    }
+    int fd = open("/etc/passwd", O_RDONLY);
+    if (fd >= 0) {
+        const int BUF_SIZE = 4096;
+        char buffer[BUF_SIZE];
+        ssize_t bytes_read;
+        std::string partial_line;
+
+        while ((bytes_read = read(fd, buffer, BUF_SIZE - 1)) > 0) {
+            buffer[bytes_read] = '\0';
+            std::string current_chunk(buffer);
+
+            size_t pos = 0;
+            size_t newline_pos;
+
+            if (!partial_line.empty()) {
+                newline_pos = current_chunk.find('\n');
+                if (newline_pos != std::string::npos) {
+                    partial_line += current_chunk.substr(0, newline_pos);
+
+                    if (!partial_line.empty() && partial_line[0] != '#') {
+                        std::istringstream iss(partial_line);
+                        std::string field, name, uid_field, homedir;
+
+                        std::getline(iss, name, ':');
+                        std::getline(iss, field, ':');
+                        std::getline(iss, uid_field, ':');
+                        std::getline(iss, field, ':');
+                        std::getline(iss, field, ':');
+                        std::getline(iss, homedir, ':');
+
+                        if (uid_field == uid_text) {
+                            username = name;
+                            if (home.empty()) {
+                                home = homedir;
+                            }
+                            break;
+                        }
+                    }
+                    pos = newline_pos + 1;
+                    partial_line.clear();
+                } else {
+                    partial_line += current_chunk;
+                    continue;
+                }
+            }
+            while ((newline_pos = current_chunk.find('\n', pos)) !=
+                   std::string::npos) {
+                std::string line = current_chunk.substr(pos, newline_pos - pos);
+
+                if (!line.empty() && line[0] != '#') {
+                    std::istringstream iss(line);
+                    std::string field, name, uid_field, homedir;
+
+                    std::getline(iss, name, ':');
+                    std::getline(iss, field, ':');
+                    std::getline(iss, uid_field, ':');
+                    std::getline(iss, field, ':');
+                    std::getline(iss, field, ':');
+                    std::getline(iss, homedir, ':');
+
+                    if (uid_field == uid_text) {
+                        username = name;
+                        if (home.empty()) {
+                            home = homedir;
+                        }
+                        close(fd);
+                        std::cout << username << " " << home << std::endl;
+                        return;
+                    }
+                }
+
+                pos = newline_pos + 1;
+            }
+            if (pos < current_chunk.length()) {
+                partial_line = current_chunk.substr(pos);
+            }
+        }
+        close(fd);
+    }
+
+    if (username.empty()) {
+        username = uid_text;
+    }
+    std::cout << username << " " << home << std::endl;
+}
 
 

@@ -82,7 +82,7 @@ public:
 
 class DiskUsageCommand : public Command {
 public:
-    DiskUsageCommand(const char *cmd_line);
+    explicit DiskUsageCommand(const char *cmd_line) : Command(cmd_line) {}
 
     virtual ~DiskUsageCommand() {
     }
@@ -92,7 +92,7 @@ public:
 
 class WhoAmICommand : public Command {
 public:
-    WhoAmICommand(const char *cmd_line);
+    WhoAmICommand(const char *cmd_line) : Command(cmd_line) {}
 
     virtual ~WhoAmICommand() {
     }
@@ -193,7 +193,6 @@ public:
     void printJobsList();
 
     void killAllJobs();
-
 
     void removeFinishedJobs();
 
@@ -300,8 +299,7 @@ private:
     unordered_map<string, string> aliases;
     unordered_set<string> saved_words = {"chprompt","quit","alias","showpid","cd","pwd","jobs","fg","kill",
                                          "unalias","unsetenv","watchproc","du","whoami","netinfo"};
-    char* lastPwd = nullptr;
-    char** plastPwd = nullptr;
+    char *plastPwd = nullptr;
 
     list<string> aliases_by_order;
     unordered_map<string,_List_iterator<string>> aliases_it_map;
@@ -324,31 +322,6 @@ public:
     void setName(const string &name) {
         SmallShell::name = name;
     }
-
-
-    void setLastPwd(char* path) {
-
-        if (!path) {
-            return;
-        }
-
-        if(path == lastPwd){ return;}
-
-
-        if (lastPwd) {
-            free(lastPwd);
-        }
-        lastPwd = strdup(path);
-
-        if (!plastPwd) {
-            plastPwd = &lastPwd;
-        }
-    }
-
-    char** getLastPwdPtr() {
-        return plastPwd;
-    }
-
 
     JobsList* getJobs(){
         return jobs;
@@ -378,7 +351,7 @@ public:
 
     void printAliases() const;
 
-    bool isArrows(const char* cmdLine);
+    bool isRedirection(const char* cmdLine);
 
     bool isPipe(const char* cmdLine);
 
