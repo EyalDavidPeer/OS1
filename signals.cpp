@@ -7,14 +7,7 @@
 using namespace std;
 
 void ctrlCHandler(int sig_num) {
-    cout << "smash: got ctrl-C" << endl;
-    int fg_pid = SmallShell::getInstance().getForegroundPid();
-
-    //if fg process other than shell exists, the fg_pid it will not be -1
-    if ( fg_pid != -1){
-        kill(fg_pid, SIGKILL);
-      cout <<  "smash: process " << fg_pid << " was killed" << endl;
-    }
+    // TODO: Add your implementation
 }
 
 void sigchildHandler(int sig_num) {
@@ -22,11 +15,11 @@ void sigchildHandler(int sig_num) {
     int status;
     int pid = waitpid(-1, &status, WNOHANG | WUNTRACED);
     //handle stopped process
-    if(WIFSTOPPED(status)){
+    if (WIFSTOPPED(status)) {
 
     }
-    //handle terminated process
-    else { // add if is direct son of shell pid
+        //handle terminated process
+    else {
         SmallShell::getInstance().getJobs()->removeJobByPid(pid);
     }
 }
